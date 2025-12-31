@@ -4,7 +4,7 @@ def lengths_to_mask(lengths, max_len):
     # max_len = max(lengths)
     mask = torch.arange(max_len, device=lengths.device).expand(len(lengths), max_len) < lengths.unsqueeze(1)
     return mask
-    
+
 
 def collate_tensors(batch):
     dims = batch[0].dim()
@@ -21,6 +21,7 @@ def collate_tensors(batch):
 
 def collate(batch):
     notnone_batches = [b for b in batch if b is not None]
+
     databatch = [b['inp'] for b in notnone_batches]
     if 'lengths' in notnone_batches[0]:
         lenbatch = [b['lengths'] for b in notnone_batches]
@@ -51,7 +52,7 @@ def collate(batch):
     if 'action_text' in notnone_batches[0]:
         action_text = [b['action_text']for b in notnone_batches]
         cond['y'].update({'action_text': action_text})
-    
+
     if 'prefix' in notnone_batches[0]:
         cond['y'].update({'prefix': collate_tensors([b['prefix'] for b in notnone_batches])})
     
@@ -90,5 +91,20 @@ def t2m_prefix_collate(batch, pred_len):
         'orig_lengths': b[5][0], #  For evaluation
         'key': b[7] if len(b) > 7 else None,
     } for b in batch]
+    return collate(adapted_batch)
+
+def shelf_assembly_collate(batch):
+    adapted_batch = [{
+        'inp': torch.cat([b[0]['body_pose'], b[0]['right_hand_pose'], b[0]['left_hand_pose']], dim=1),
+        'text': b[1]['caption']
+    } for b in batch]
+
+    # Change order
+    # from : [batch_size, frames, njoints, nfeats]
+    # to   ; [batch_size, njoints, nfeats, frames]
+
+    for b in adapted_batch:
+        b['inp'] = b['inp'].permute(1, 2, 0)
+
     return collate(adapted_batch)
 

@@ -1238,6 +1238,7 @@ class GaussianDiffusion:
         # enc = model.model._modules['module']
         enc = model.model
         mask = model_kwargs['y']['mask']
+        import pdb; pdb.set_trace()
         get_xyz = lambda sample: enc.rot2xyz(sample, mask=None, pose_rep=enc.pose_rep, translation=enc.translation,
                                              glob=enc.glob,
                                              # jointstype='vertices',  # 3.4 iter/sec # USED ALSO IN MotionCLIP
@@ -1265,7 +1266,6 @@ class GaussianDiffusion:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
-
             if self.model_var_type in [
                 ModelVarType.LEARNED,
                 ModelVarType.LEARNED_RANGE,
@@ -1337,7 +1337,7 @@ class GaussianDiffusion:
                 terms["vel_mse"] = self.masked_l2(target_vel[:, :-1, :, :], # Remove last joint, is the root location!
                                                   model_output_vel[:, :-1, :, :],
                                                   mask[:, :, :, 1:])  # mean_flat((target_vel - model_output_vel) ** 2)
-            
+
             if self.lambda_target_loc > 0.:
                 assert self.model_mean_type == ModelMeanType.START_X, 'This feature supports only X_start pred for now!'
                 ref_target = model_kwargs['y']['target_cond']
@@ -1345,7 +1345,7 @@ class GaussianDiffusion:
                                             model_kwargs['y']['lengths'], dataset.t2m_dataset.opt.joints_num, model.all_goal_joint_names, 
                                             model_kwargs['y']['target_joint_names'], model_kwargs['y']['is_heading'])
                 terms["target_loc"] = masked_goal_l2(pred_target, ref_target, model_kwargs['y'], model.all_goal_joint_names)
-                            
+
 
             terms["loss"] = terms["rot_mse"] + terms.get('vb', 0.) +\
                             (self.lambda_vel * terms.get('vel_mse', 0.)) +\

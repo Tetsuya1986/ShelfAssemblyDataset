@@ -66,6 +66,8 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, dataset, figsize=(3
         data *= 0.003  # scale for visualization
     elif dataset == 'humanml':
         data *= 1.3  # scale for visualization
+    elif dataset == 'shelf_assembly':
+        data *= 1.3
     elif dataset in ['humanact12', 'uestc']:
         data *= -1.5 # reverse axes, scale for visualization
 
@@ -87,13 +89,19 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, dataset, figsize=(3
     n_frames = data.shape[0]
     #     print(dataset.shape)
 
-    height_offset = MINS[1]
-    data[:, :, 1] -= height_offset
-    trajec = data[:, 0, [0, 2]]  # memorize original x,z pelvis values
+    height_offset = MINS[2]
+    data[:, :, 2] -= height_offset
+    trajec = data[:, 0, [0, 1]]  # memorize original x,z pelvis values
 
-    # locate x,z pelvis values of ** each frame ** at zero
-    data[..., 0] -= data[:, 0:1, 0] 
-    data[..., 2] -= data[:, 0:1, 2]
+    data[..., 0] -= data[:, 0:1, 0]
+    data[..., 1] -= data[:, 0:1, 1]
+
+    # height_offset = MINS[1]
+    # data[:, :, 1] -= height_offset
+    # trajec = data[:, 0, [0, 2]]  # memorize original x,z pelvis values
+    # # locate x,z pelvis values of ** each frame ** at zero
+    # data[..., 0] -= data[:, 0:1, 0]
+    # data[..., 2] -= data[:, 0:1, 2]
 
     #     print(trajec.shape)
 
@@ -112,17 +120,22 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, dataset, figsize=(3
         _title += f' [{index}]'
         fig.suptitle(_title, fontsize=10)
 
-        plot_xzPlane(MINS[0] - trajec[index, 0], MAXS[0] - trajec[index, 0], 0, MINS[2] - trajec[index, 1],
+        plot_xzPlane(MINS[0] - trajec[index, 0],
+                     MAXS[0] - trajec[index, 0],
+                     0,
+                     MINS[2] - trajec[index, 1],
                      MAXS[2] - trajec[index, 1])
 
         used_colors = colors_blue if index in gt_frames else colors
+
         for i, (chain, color) in enumerate(zip(kinematic_tree, used_colors)):
             if i < 5:
                 linewidth = 4.0
             else:
                 linewidth = 2.0
-            ax.plot3D(data[index, chain, 0], data[index, chain, 1], data[index, chain, 2], linewidth=linewidth,
-                      color=color)
+
+            ax.plot3D(data[index, chain, 0], data[index, chain, 1], data[index, chain, 2],
+                      linewidth=linewidth, color=color)
         #         print(trajec[:index, 0].shape)
 
         plt.axis('off')

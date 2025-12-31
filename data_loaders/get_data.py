@@ -1,6 +1,6 @@
 from torch.utils.data import DataLoader
 from data_loaders.tensors import collate as all_collate
-from data_loaders.tensors import t2m_collate, t2m_prefix_collate
+from data_loaders.tensors import t2m_collate, t2m_prefix_collate, shelf_assembly_collate
 
 def get_dataset_class(name):
     if name == "amass":
@@ -18,6 +18,9 @@ def get_dataset_class(name):
     elif name == "kit":
         from data_loaders.humanml.data.dataset import KIT
         return KIT
+    elif name == 'shelf_assembly':
+        from data_loaders.shelf_assembly.dataset import ShelfAssemblyDataset
+        return ShelfAssemblyDataset
     else:
         raise ValueError(f'Unsupported dataset name [{name}]')
 
@@ -29,6 +32,8 @@ def get_collate_fn(name, hml_mode='train', pred_len=0, batch_size=1):
         if pred_len > 0:
             return lambda x: t2m_prefix_collate(x, pred_len=pred_len)
         return lambda x: t2m_collate(x, batch_size)
+    elif name in ["shelf_assembly"]:
+        return lambda x: shelf_assembly_collate(x)
     else:
         return all_collate
 
@@ -36,7 +41,7 @@ def get_collate_fn(name, hml_mode='train', pred_len=0, batch_size=1):
 def get_dataset(name, num_frames, split='train', hml_mode='train', abs_path='.', fixed_len=0, 
                 device=None, autoregressive=False, cache_path=None): 
     DATA = get_dataset_class(name)
-    if name in ["humanml", "kit"]:
+    if name in ["humanml", "kit", "shelf_assembly"]:
         dataset = DATA(split=split, num_frames=num_frames, mode=hml_mode, abs_path=abs_path, fixed_len=fixed_len, 
                        device=device, autoregressive=autoregressive)
     else:

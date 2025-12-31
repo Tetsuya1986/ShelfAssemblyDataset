@@ -47,6 +47,10 @@ def get_model_args(args, data):
         data_rep = 'hml_vec'
         njoints = 251
         nfeats = 1
+    elif args.dataset == 'shelf_assembly':
+        data_rep = 'xyz'
+        njoints = 51
+        nfeats = 3
 
     # Compatibility with old models
     if not hasattr(args, 'pred_len'):
@@ -128,5 +132,6 @@ def load_saved_model(model, model_path, use_avg: bool=False):  # use_avg_model
             state_dict = state_dict['model']
         else:
             print('checkpoint has no avg model, loading as usual.')
+
     load_model_wo_clip(model, state_dict)
     return model

@@ -24,15 +24,34 @@ def main(args=None):
     if args is None:
         # args is None unless this method is called from another function (e.g. during training)
         args = generate_args()
+
     fixseed(args.seed)
     out_path = args.output_dir
-    n_joints = 22 if args.dataset == 'humanml' else 21
+    if args.dataset == 'humanml':
+        n_joints = 22
+    elif args.dataset == 'shelf_assembly':
+        n_joints = 51
+    else:
+        n_joints = 21
     name = os.path.basename(os.path.dirname(args.model_path))
     niter = os.path.basename(args.model_path).replace('model', '').replace('.pt', '')
-    max_frames = 196 if args.dataset in ['kit', 'humanml'] else 60
-    fps = 12.5 if args.dataset == 'kit' else 20
+    if args.dataset in ['kit', 'humanml']:
+        max_frames = 196
+    elif args.dataset == 'shelf_assembly':
+        max_frames = 300
+    else:
+        max_frames = 60
+
+    if args.dataset == 'kit':
+        fps = 12.5
+    elif args.dataset == 'shelf_assembly':
+        fps = 30.0
+    else:
+        fps = 20
+
     n_frames = min(max_frames, int(args.motion_length*fps))
     is_using_data = not any([args.input_text, args.text_prompt, args.action_file, args.action_name])
+
     if args.context_len > 0:
         is_using_data = True  # For prefix completion, we need to sample a prefix
     dist_util.setup_dist(args.device)
@@ -48,6 +67,7 @@ def main(args=None):
 
     # this block must be called BEFORE the dataset is loaded
     texts = None
+
     if args.text_prompt != '':
         texts = [args.text_prompt] * args.num_samples
     elif args.input_text != '':
@@ -156,7 +176,7 @@ def main(args=None):
             noise=None,
             const_noise=False,
         )
-
+        impot pdb; pdb.set_trace()
         # Recover XYZ *positions* from HumanML3D vector representation
         if model.data_rep == 'hml_vec':
             n_joints = 22 if sample.shape[1] == 263 else 21
@@ -165,7 +185,10 @@ def main(args=None):
             sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
 
         rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
-        rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
+        # rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
+        rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, model_kwargs['y']['mask'].shape[-1]).bool()
+        sample = sample[:,:,:,:model_kwargs['y']['mask'].shape[-1]]
+
         sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
                                jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
                                get_rotations_back=False)
@@ -209,7 +232,12 @@ def main(args=None):
         fw.write('\n'.join([str(l) for l in all_lengths]))
 
     print(f"saving visualizations to [{out_path}]...")
-    skeleton = paramUtil.kit_kinematic_chain if args.dataset == 'kit' else paramUtil.t2m_kinematic_chain
+    if args.dataset == 'kit':
+        skeleton = paramUtil.kit_kinematic_chain
+    elif args.dataset == 'shelf_assembly':
+        skeleton = paramUtil.t2m_kinematic_chain + paramUtil.t2m_left_hand_chain + paramUtil.t2m_right_hand_chain
+    else:
+        skeleton = paramUtil.t2m_kinematic_chain
 
     sample_print_template, row_print_template, all_print_template, \
     sample_file_template, row_file_template, all_file_template = construct_template_variables(args.unconstrained)
@@ -229,7 +257,7 @@ def main(args=None):
                     caption_per_frame += [c] * args.pred_len
                 caption = caption_per_frame
 
-            
+
             # Trim / freeze motion if needed
             length = all_lengths[rep_i*args.batch_size + sample_i]
             motion = all_motions[rep_i*args.batch_size + sample_i].transpose(2, 0, 1)[:max_length]
@@ -305,7 +333,8 @@ def load_dataset(args, max_frames, n_frames):
                               batch_size=args.batch_size,
                               num_frames=max_frames,
                               split='test',
-                              hml_mode='train' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
+                              # hml_mode='action' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
+                              hml_mode='action',
                               fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev())
     data.fixed_length = n_frames
     return data

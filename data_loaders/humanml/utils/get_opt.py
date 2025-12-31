@@ -68,6 +68,15 @@ def get_opt(opt_path, device):
         opt.joints_num = 21
         opt.dim_pose = 251
         opt.max_motion_length = 196
+    elif opt.dataset_name == 'shelf_assembly':
+        opt.data_root = '/data/utsubo0/users/narita/shelf_assembly/shelf_assembly_dataset'
+        opt.motion_dir = pjoin(opt.data_root, 'smpl-x_py37')
+        opt.text_dir = pjoin(opt.data_root, 'annotation')
+        opt.headcam_dir = pjoin(opt.data_root, 'headcam')
+        opt.joints_num = 51
+        opt.dim_pose = 251
+        opt.max_motion_length = 300
+        opt.fps = 30
     else:
         raise KeyError('Dataset not recognized')
 

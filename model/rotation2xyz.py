@@ -46,6 +46,7 @@ class Rotation2xyz:
         elif pose_rep == "rotquat":
             rotations = geometry.quaternion_to_matrix(x_rotations[mask])
         elif pose_rep == "rot6d":
+            import pdb; pdb.set_trace()
             rotations = geometry.rotation_6d_to_matrix(x_rotations[mask])
         else:
             raise NotImplementedError("No geometry for this one.")
