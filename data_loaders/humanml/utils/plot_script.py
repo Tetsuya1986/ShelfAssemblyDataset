@@ -89,19 +89,19 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, dataset, figsize=(3
     n_frames = data.shape[0]
     #     print(dataset.shape)
 
-    height_offset = MINS[2]
-    data[:, :, 2] -= height_offset
-    trajec = data[:, 0, [0, 1]]  # memorize original x,z pelvis values
+    # height_offset = MINS[2]
+    # data[:, :, 2] -= height_offset
+    # trajec = data[:, 0, [0, 1]]  # memorize original x,z pelvis values
 
-    data[..., 0] -= data[:, 0:1, 0]
-    data[..., 1] -= data[:, 0:1, 1]
-
-    # height_offset = MINS[1]
-    # data[:, :, 1] -= height_offset
-    # trajec = data[:, 0, [0, 2]]  # memorize original x,z pelvis values
-    # # locate x,z pelvis values of ** each frame ** at zero
     # data[..., 0] -= data[:, 0:1, 0]
-    # data[..., 2] -= data[:, 0:1, 2]
+    # data[..., 1] -= data[:, 0:1, 1]
+
+    height_offset = MINS[1]
+    data[:, :, 1] -= height_offset
+    trajec = data[:, 0, [0, 2]]  # memorize original x,z pelvis values
+    # locate x,z pelvis values of ** each frame ** at zero
+    data[..., 0] -= data[:, 0:1, 0]
+    data[..., 2] -= data[:, 0:1, 2]
 
     #     print(trajec.shape)
 

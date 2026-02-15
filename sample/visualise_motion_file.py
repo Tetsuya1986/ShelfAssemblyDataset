@@ -160,53 +160,57 @@ def main(args=None):
                                                model_kwargs['y']['text_embed'][1].unsqueeze(0).repeat(args.num_samples, 1, 1))
         else:
             raise NotImplementedError('DiP model only supports BERT text encoder at the moment. If you implement this, please send a PR!')
-    
+
     for rep_i in range(args.num_repetitions):
         print(f'### Sampling [repetitions #{rep_i}]')
 
-        sample = sample_fn(
-            model,
-            motion_shape,
-            clip_denoised=False,
-            model_kwargs=model_kwargs,
-            skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-            init_image=init_image,
-            progress=True,
-            dump_steps=None,
-            noise=None,
-            const_noise=False,
-        )
+        for sample, model_kwargs in data:
 
-        # Recover XYZ *positions* from HumanML3D vector representation
-        if model.data_rep == 'hml_vec':
-            n_joints = 22 if sample.shape[1] == 263 else 21
-            sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
-            sample = recover_from_ric(sample, n_joints)
-            sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
+            # Recover XYZ *positions* from HumanML3D vector representation
+            import pdb; pdb.set_trace()
+            if model.data_rep == 'hml_vec':
+                n_joints = 22 if sample.shape[1] == 263 else 21
+                sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
+                sample = recover_from_ric(sample, n_joints)
+                sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
 
-        rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
-        # rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
-        rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, model_kwargs['y']['mask'].shape[-1]).bool()
-        sample = sample[:,:,:,:model_kwargs['y']['mask'].shape[-1]]
+            rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
+            # rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
+            rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, model_kwargs['y']['mask'].shape[-1]).bool()
+            sample = sample[:,:,:,:model_kwargs['y']['mask'].shape[-1]]
 
-        sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                               jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
-                               get_rotations_back=False)
+            sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
+                                   jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                   get_rotations_back=False)
 
-        if args.unconstrained:
-            all_text += ['unconstrained'] * args.num_samples
-        else:
-            text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
-            all_text += model_kwargs['y'][text_key]
+            if args.unconstrained:
+                all_text += ['unconstrained'] * args.num_samples
+            else:
+                text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
+                all_text += model_kwargs['y'][text_key]
 
-        all_motions.append(sample.cpu().numpy())
-        _len = model_kwargs['y']['lengths'].cpu().numpy()
-        if 'prefix' in model_kwargs['y'].keys():
+            all_motions.append(sample.cpu().numpy())
+            _len = model_kwargs['y']['lengths'].cpu().numpy()
+            # if 'prefix' in model_kwargs['y'].keys():
+                # _len[:] = sample.shape[-1]
+                # all_lengths.append(_len)
             _len[:] = sample.shape[-1]
-        all_lengths.append(_len)
+            all_lengths.append(_len)
 
-        print(f"created {len(all_motions) * args.batch_size} samples")
+            print(f"created {len(all_motions) * args.batch_size} samples")
 
+            break
+
+    max_len = 0
+    for mot in all_motions:
+        if mot.shape[-1] > max_len:
+            max_len = mot.shape[-1]
+
+    for i, mot in enumerate(all_motions):
+        if mot.shape[-1] < max_len:
+            pads = ((0, 0), (0, 0), (0, 0), (0, max_len - mot.shape[-1]))
+            padded_mot = np.pad(mot, pads, mode='constant', constant_values=0)
+            all_motions[i] = padded_mot
 
     all_motions = np.concatenate(all_motions, axis=0)
     all_motions = all_motions[:total_num_samples]  # [bs, njoints, 6, seqlen]

@@ -29,7 +29,6 @@ class ShelfAssemblyDataset(data.Dataset):
 
     def load_motion_data(self, motion_dir, mode, device):
         data_list = []
-        # prev_idx = '000000_A_0_Ass_2_HH_S_Main'
         dic = {}
         flg = 0
         for root, _, files in os.walk(motion_dir):
@@ -66,7 +65,6 @@ class ShelfAssemblyDataset(data.Dataset):
                         if flg == 0b11111:
                             data_list.append(dic)
                             flg = 0
-                            # prev_idx = idx
                             dic = {}
 
         return data_list
@@ -194,6 +192,7 @@ class ShelfAssemblyDataset(data.Dataset):
                 adic['ass_dis'] = ann['ass_dis']
                 adic['main_sub'] = ann['main_sub']
                 adic['caption'] = act['action_verb'] + ' ' + act['action_noun']
+                adic['caption_verb'] = act['action_verb']
                 annotation_list.append(adic)
 
         return motion_list, annotation_list
