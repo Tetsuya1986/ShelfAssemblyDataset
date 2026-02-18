@@ -55,15 +55,24 @@ def main(args=None):
     if args.context_len > 0:
         is_using_data = True  # For prefix completion, we need to sample a prefix
     dist_util.setup_dist(args.device)
-    if out_path == '':
-        out_path = os.path.join(os.path.dirname(args.model_path),
-                                'samples_{}_{}_seed{}'.format(name, niter, args.seed))
-        if args.text_prompt != '':
-            out_path += '_' + args.text_prompt.replace(' ', '_').replace('.', '')
-        elif args.input_text != '':
-            out_path += '_' + os.path.basename(args.input_text).replace('.txt', '').replace(' ', '_').replace('.', '')
-        elif args.dynamic_text_path != '':
-            out_path += '_' + os.path.basename(args.dynamic_text_path).replace('.txt', '').replace(' ', '_').replace('.', '')
+    if out_path == "":
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = os.path.join(
+            os.path.dirname(args.model_path),
+            "samples_{}_{}_seed{}_{}".format(name, niter, args.seed, timestamp),
+        )
+        if args.text_prompt != "":
+            out_path += "_" + args.text_prompt.replace(" ", "_").replace(".", "")
+        elif args.input_text != "":
+            out_path += "_" + os.path.basename(args.input_text).replace(
+                ".txt", ""
+            ).replace(" ", "_").replace(".", "")
+        elif args.dynamic_text_path != "":
+            out_path += "_" + os.path.basename(args.dynamic_text_path).replace(
+                ".txt", ""
+            ).replace(" ", "_").replace(".", "")
 
     # this block must be called BEFORE the dataset is loaded
     texts = None

@@ -784,7 +784,7 @@ class HumanML3D(data.Dataset):
             # used by T2M models (including evaluators)
             self.mean = np.load(pjoin(opt.meta_dir, f'{opt.dataset_name}_mean.npy'))
             self.std = np.load(pjoin(opt.meta_dir, f'{opt.dataset_name}_std.npy'))
-        elif mode in ['train', 'eval', 'text_only']:
+        elif mode in ['train', 'eval', 'text_only', 'action']:
             # used by our models
             self.mean = np.load(pjoin(opt.data_root, 'Mean.npy'))
             self.std = np.load(pjoin(opt.data_root, 'Std.npy'))

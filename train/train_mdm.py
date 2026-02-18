@@ -5,6 +5,8 @@ Train a diffusion model on images.
 
 import os
 import json
+import random
+import string
 from utils.fixseed import fixseed
 from utils.parser_util import train_args
 from utils import dist_util
@@ -20,6 +22,22 @@ if torch.cuda.is_available():
 def main():
     args = train_args()
     fixseed(args.seed)
+    # If save_dir doesn't exist, look for existing dirs with the same prefix + random suffix
+    # to support resume via the base name (e.g. save/shelf_202602180113 finds save/shelf_202602180113_x7k2)
+    if not os.path.exists(args.save_dir):
+        import glob
+
+        base = args.save_dir.rstrip("/")
+        existing = sorted(glob.glob(base + "_????"))  # match 4-char suffix
+        if existing:
+            args.save_dir = existing[-1]  # use the latest matching directory
+            print(f"Resuming from existing directory: {args.save_dir}")
+        else:
+            run_id = "".join(
+                random.choices(string.ascii_lowercase + string.digits, k=4)
+            )
+            args.save_dir = base + "_" + run_id
+
     train_platform_type = eval(args.train_platform_type)
     train_platform = train_platform_type(args.save_dir)
     train_platform.report_args(args, name='Args')

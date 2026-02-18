@@ -3,9 +3,7 @@ import glob
 
 class TrainPlatform:
     def __init__(self, save_dir, *args, **kwargs):
-        self.path, file = os.path.split(save_dir)
-        self.name = os.path.basename(self.path.strip('/'))
-        # self.name = kwargs.get('name', file)
+        self.path, self.name = os.path.split(save_dir.rstrip("/"))
 
     def report_scalar(self, name, value, iteration, group_name=None):
         pass
@@ -69,7 +67,7 @@ class WandBPlatform(TrainPlatform):
             name=self.name,
             id=self.name,  # in order to send continued runs to the same record
             resume='allow',  # in order to send continued runs to the same record
-            entity='tetsuya1986',  # will use your default entity if not set
+            entity='umagami',  # will use your default entity if not set
             save_code=True,
             config=config)  # config can also be sent via report_args()
 
