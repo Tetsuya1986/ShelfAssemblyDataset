@@ -1,31 +1,36 @@
-import torch
-from torch.utils import data
-import os
-from data_loaders.humanml.utils.get_opt import get_opt
-from tqdm import tqdm
-import pickle
-import numpy as np
+import copy
 import json
+import os
+
 import cv2
 import numpy as np
-import copy
+import torch
+from torch.utils import data
+from tqdm import tqdm
+
+from data_loaders.humanml.utils.get_opt import get_opt
+from utils.rotation_conversions import axis_angle_to_matrix, matrix_to_rotation_6d
+
 
 class ShelfAssemblyDataset(data.Dataset):
-    def __init__(self, mode, datapath='./dataset/shelf_assembly_opt.txt', split='train', **kwargs):
-        abs_base_path = kwargs.get('abs_path', '.')
+    def __init__(
+        self, mode, datapath="./dataset/shelf_assembly_opt.txt", split="train", **kwargs
+    ):
+        abs_base_path = kwargs.get("abs_path", ".")
         dataset_opt_path = os.path.join(abs_base_path, datapath)
-        device = kwargs.get('device', None)
+        device = kwargs.get("device", None)
         opt = get_opt(dataset_opt_path, device)
         max_frames = opt.max_motion_length
 
-        print(f'Loading dataset {opt.dataset_name} ...')
+        print(f"Loading dataset {opt.dataset_name} ...")
         self.motion_data = self.load_motion_data(opt.motion_dir, mode, device)
         self.annotation = self.load_annotation(opt.text_dir, mode, device)
         # headcam_img = self.load_headcam_img(opt.headcam_dir, mode, annotation, max_frames, device)
         fps = opt.fps
         max_len = opt.max_motion_length
-        self.motion_clip, self.annotation_clip = \
-            self.extract_motion_clip(mode, self.motion_data, self.annotation, fps, max_len, device)
+        self.motion_clip, self.annotation_clip = self.extract_motion_clip(
+            mode, self.motion_data, self.annotation, fps, max_len, device
+        )
 
     def load_motion_data(self, motion_dir, mode, device):
         data_list = []
@@ -34,30 +39,42 @@ class ShelfAssemblyDataset(data.Dataset):
         for root, _, files in os.walk(motion_dir):
             sorted_files = sorted(files)
             for filename in sorted_files:
-                if mode == 'action':
-                    if filename.lower().endswith('.npy') and \
-                       filename[17:19] == 'HH':
-
+                if mode == "action":
+                    if filename.lower().endswith(".npy") and filename[17:19] == "HH":
                         no = int(filename[:6])
                         main_sub = filename[22:26].replace("_", "")
-                        dic['no'] = no
-                        dic['main_sub'] = main_sub
+                        dic["no"] = no
+                        dic["main_sub"] = main_sub
 
                         filepath = os.path.join(root, filename)
-                        if filename.lower().endswith('_global_orient.npy'):
-                            dic['global_orient'] = torch.tensor(np.load(filepath))#.to(device)
+                        if filename.lower().endswith("_global_orient.npy"):
+                            tensor = torch.tensor(np.load(filepath))
+                            dic["global_orient"] = matrix_to_rotation_6d(
+                                axis_angle_to_matrix(tensor)
+                            )
                             flg |= 0b00001
-                        elif filename.lower().endswith('_root_pos.npy'):
-                            dic['root_pos'] = torch.tensor(np.load(filepath))#.to(device)
+                        elif filename.lower().endswith("_root_pos.npy"):
+                            dic["root_pos"] = torch.tensor(
+                                np.load(filepath)
+                            )  # .to(device)
                             flg |= 0b00010
-                        elif filename.lower().endswith('_body_pose.npy'):
-                            dic['body_pose'] = torch.tensor(np.load(filepath))#.to(device)
+                        elif filename.lower().endswith("_body_pose.npy"):
+                            tensor = torch.tensor(np.load(filepath))
+                            dic["body_pose"] = matrix_to_rotation_6d(
+                                axis_angle_to_matrix(tensor)
+                            )
                             flg |= 0b00100
-                        elif filename.lower().endswith('_right_hand_pose.npy'):
-                            dic['right_hand_pose'] = torch.tensor(np.load(filepath))#.to(device)
+                        elif filename.lower().endswith("_right_hand_pose.npy"):
+                            tensor = torch.tensor(np.load(filepath))
+                            dic["right_hand_pose"] = matrix_to_rotation_6d(
+                                axis_angle_to_matrix(tensor)
+                            )
                             flg |= 0b01000
-                        elif filename.lower().endswith('_left_hand_pose.npy'):
-                            dic['left_hand_pose'] = torch.tensor(np.load(filepath))#.to(device)
+                        elif filename.lower().endswith("_left_hand_pose.npy"):
+                            tensor = torch.tensor(np.load(filepath))
+                            dic["left_hand_pose"] = matrix_to_rotation_6d(
+                                axis_angle_to_matrix(tensor)
+                            )
                             flg |= 0b10000
 
                         # save a file
@@ -74,21 +91,23 @@ class ShelfAssemblyDataset(data.Dataset):
         for root, _, files in os.walk(text_dir):
             sorted_files = sorted(files)
             for filename in sorted_files:
-                if mode == 'action':
-                    if filename.lower().endswith('_action.json') and \
-                       filename[17:19] == 'HH':
+                if mode == "action":
+                    if (
+                        filename.lower().endswith("_action.json")
+                        and filename[17:19] == "HH"
+                    ):
                         filepath = os.path.join(root, filename)
-                        with open(filepath, 'r') as f:
+                        with open(filepath, "r") as f:
                             data = json.load(f)
                             dic = {}
-                            dic['no']       = data['no']
-                            dic['shelf_id'] = data['shelf_id']
-                            dic['ass_dis']  = data['ass_dis']
-                            dic['main_sub'] = 'Main'
-                            dic['data']     = data['Main_data']
+                            dic["no"] = data["no"]
+                            dic["shelf_id"] = data["shelf_id"]
+                            dic["ass_dis"] = data["ass_dis"]
+                            dic["main_sub"] = "Main"
+                            dic["data"] = data["Main_data"]
                             data_list.append(copy.deepcopy(dic))
-                            dic['main_sub'] = 'Sub'
-                            dic['data']     = data['Sub_data']
+                            dic["main_sub"] = "Sub"
+                            dic["data"] = data["Sub_data"]
                             data_list.append(copy.deepcopy(dic))
         return data_list
 
@@ -97,25 +116,31 @@ class ShelfAssemblyDataset(data.Dataset):
         idx = 0
         for root, _, files in os.walk(headcam_dir):
             sorted_files = sorted(files)
-            for filename in tqdm(sorted_files, desc='files'):
-                if mode == 'action':
-                    if filename.lower().endswith('headcam.mp4') and \
-                       int(filename[:6]) == annotation[idx]['no'] and \
-                       filename[11:14] == annotation[idx]['ass_dis'][:3]:
+            for filename in tqdm(sorted_files, desc="files"):
+                if mode == "action":
+                    if (
+                        filename.lower().endswith("headcam.mp4")
+                        and int(filename[:6]) == annotation[idx]["no"]
+                        and filename[11:14] == annotation[idx]["ass_dis"][:3]
+                    ):
                         filepath = os.path.join(root, filename)
                         cap = cv2.VideoCapture(filepath)
                         imgs = []
-                        for ann in tqdm(annotation[idx]['data'], desc='ann'):
-                            start_str = ann['s_time']
-                            end_str   = ann['e_time']
-                            hours, minutes, seconds = start_str.split(':')
-                            start_sec = int(hours)*3600 + int(minutes) * 60 + float(seconds)
-                            hours, minutes, seconds = end_str.split(':')
-                            end_sec = int(hours)*3600 + int(minutes) * 60 + float(seconds)
+                        for ann in tqdm(annotation[idx]["data"], desc="ann"):
+                            start_str = ann["s_time"]
+                            end_str = ann["e_time"]
+                            hours, minutes, seconds = start_str.split(":")
+                            start_sec = (
+                                int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                            )
+                            hours, minutes, seconds = end_str.split(":")
+                            end_sec = (
+                                int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                            )
 
                             fps = cap.get(cv2.CAP_PROP_FPS)
                             start_frame = int(start_sec * fps)
-                            end_frame   = int(end_sec * fps)
+                            end_frame = int(end_sec * fps)
 
                             frames = []
                             current_frame = 0
@@ -123,10 +148,13 @@ class ShelfAssemblyDataset(data.Dataset):
                             while True:
                                 ret, frame = cap.read()
                                 if not ret:
-                                    print('break')
+                                    print("break")
                                     break
 
-                                if current_frame >= start_frame and current_frame <= end_frame:
+                                if (
+                                    current_frame >= start_frame
+                                    and current_frame <= end_frame
+                                ):
                                     frames.append(frame)
                                 elif current_frame > end_frame:
                                     break
@@ -140,8 +168,12 @@ class ShelfAssemblyDataset(data.Dataset):
                             elif frames_array.shape[0] < max_frames:
                                 T, X, Y, C = frames_array.shape
                                 pad_len = max_frames - T
-                                padding = np.zeros((pad_len, X, Y ,C), dtype=frames_array.dtype)
-                                frames_array = np.concatenate((frames_array, padding), axis=0)
+                                padding = np.zeros(
+                                    (pad_len, X, Y, C), dtype=frames_array.dtype
+                                )
+                                frames_array = np.concatenate(
+                                    (frames_array, padding), axis=0
+                                )
                             # else:
                             #     do nothing
 
@@ -154,22 +186,23 @@ class ShelfAssemblyDataset(data.Dataset):
         return data_list
 
     def extract_motion_clip(self, mode, motion, annotation, fps, max_len, device):
-        assert len(annotation) == len(motion), \
-          f'motion length:{len(motion)} is not the same to annotation length:{len(annotation)}'
+        assert len(annotation) == len(motion), (
+            f"motion length:{len(motion)} is not the same to annotation length:{len(annotation)}"
+        )
 
         motion_list = []
         annotation_list = []
-        for ann, mo in tqdm(zip(annotation, motion), desc='extract'):
-            assert ann['no'] == mo['no']
-            assert ann['main_sub'] == mo['main_sub']
+        for ann, mo in tqdm(zip(annotation, motion), desc="extract"):
+            assert ann["no"] == mo["no"]
+            assert ann["main_sub"] == mo["main_sub"]
 
-            for act in ann['data']:
-                start_str = act['s_time']
-                end_str = act['e_time']
-                hours, minutes, seconds = start_str.split(':')
-                start_sec = int(hours)*3600 + int(minutes) * 60 + float(seconds)
-                hours, minutes, seconds = end_str.split(':')
-                end_sec = int(hours)*3600 + int(minutes) * 60 + float(seconds)
+            for act in ann["data"]:
+                start_str = act["s_time"]
+                end_str = act["e_time"]
+                hours, minutes, seconds = start_str.split(":")
+                start_sec = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                hours, minutes, seconds = end_str.split(":")
+                end_sec = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
                 s_frame = int(start_sec * fps)
                 e_frame = int(end_sec * fps)
 
@@ -177,22 +210,30 @@ class ShelfAssemblyDataset(data.Dataset):
                     e_frame = s_frame + max_len - 1
 
                 mdic = {}
-                mdic['no'] = mo['no']
-                mdic['main_sub'] = mo['main_sub']
-                mdic['body_pose'] = mo['body_pose'][s_frame:e_frame+1]#.to(device)
-                mdic['global_orient'] = mo['global_orient'][s_frame:e_frame+1]#.to(device)
-                mdic['left_hand_pose'] = mo['left_hand_pose'][s_frame:e_frame+1]#.to(device)
-                mdic['right_hand_pose'] = mo['right_hand_pose'][s_frame:e_frame+1]#.to(device)
-                mdic['root_pos'] = mo['root_pos'][s_frame:e_frame+1]#.to(device)
+                mdic["no"] = mo["no"]
+                mdic["main_sub"] = mo["main_sub"]
+                mdic["body_pose"] = mo["body_pose"][
+                    s_frame : e_frame + 1
+                ]  # .to(device)
+                mdic["global_orient"] = mo["global_orient"][
+                    s_frame : e_frame + 1
+                ]  # .to(device)
+                mdic["left_hand_pose"] = mo["left_hand_pose"][
+                    s_frame : e_frame + 1
+                ]  # .to(device)
+                mdic["right_hand_pose"] = mo["right_hand_pose"][
+                    s_frame : e_frame + 1
+                ]  # .to(device)
+                mdic["root_pos"] = mo["root_pos"][s_frame : e_frame + 1]  # .to(device)
                 motion_list.append(mdic)
 
                 adic = {}
-                adic['no'] = ann['no']
-                adic['shelf_id'] = ann['shelf_id']
-                adic['ass_dis'] = ann['ass_dis']
-                adic['main_sub'] = ann['main_sub']
-                adic['caption'] = act['action_verb'] + ' ' + act['action_noun']
-                adic['caption_verb'] = act['action_verb']
+                adic["no"] = ann["no"]
+                adic["shelf_id"] = ann["shelf_id"]
+                adic["ass_dis"] = ann["ass_dis"]
+                adic["main_sub"] = ann["main_sub"]
+                adic["caption"] = act["action_verb"] + " " + act["action_noun"]
+                adic["caption_verb"] = act["action_verb"]
                 annotation_list.append(adic)
 
         return motion_list, annotation_list
@@ -204,4 +245,3 @@ class ShelfAssemblyDataset(data.Dataset):
         motion = self.motion_clip[idx]
         text = self.annotation_clip[idx]
         return motion, text
-

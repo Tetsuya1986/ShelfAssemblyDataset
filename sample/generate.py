@@ -4,6 +4,8 @@ Generate a large batch of image samples from a model and save them as a large
 numpy array. This can be used to produce samples for FID evaluation.
 """
 from utils.fixseed import fixseed
+import matplotlib
+matplotlib.use('Agg')
 import os
 import numpy as np
 import torch
@@ -30,7 +32,7 @@ def main(args=None):
     if args.dataset == 'humanml':
         n_joints = 22
     elif args.dataset == 'shelf_assembly':
-        n_joints = 51
+        n_joints = 53
     else:
         n_joints = 21
     name = os.path.basename(os.path.dirname(args.model_path))
@@ -208,7 +210,7 @@ def main(args=None):
             text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
             all_text += model_kwargs['y'][text_key]
 
-        all_motions.append(sample.cpu().numpy())
+        all_motions.append(sample.detach().cpu().numpy())
         _len = model_kwargs['y']['lengths'].cpu().numpy()
         if 'prefix' in model_kwargs['y'].keys():
             _len[:] = sample.shape[-1]

@@ -127,6 +127,9 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, dataset, figsize=(3
                      MAXS[2] - trajec[index, 1])
 
         used_colors = colors_blue if index in gt_frames else colors
+        # Ensure used_colors is long enough for kinematic_tree
+        if len(used_colors) < len(kinematic_tree):
+            used_colors = used_colors * (len(kinematic_tree) // len(used_colors) + 1)
 
         for i, (chain, color) in enumerate(zip(kinematic_tree, used_colors)):
             if i < 5:

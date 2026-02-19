@@ -26,6 +26,8 @@ def main():
     # to support resume via the base name (e.g. save/shelf_202602180113 finds save/shelf_202602180113_x7k2)
     if not os.path.exists(args.save_dir):
         import glob
+        import random
+        import string
 
         base = args.save_dir.rstrip("/")
         existing = sorted(glob.glob(base + "_????"))  # match 4-char suffix
@@ -33,10 +35,12 @@ def main():
             args.save_dir = existing[-1]  # use the latest matching directory
             print(f"Resuming from existing directory: {args.save_dir}")
         else:
+            # Always create new random ID for base path
             run_id = "".join(
-                random.choices(string.ascii_lowercase + string.digits, k=4)
+                random.SystemRandom().choices(string.ascii_lowercase + string.digits, k=4)
             )
             args.save_dir = base + "_" + run_id
+            print(f"Creating new directory: {args.save_dir}")
 
     train_platform_type = eval(args.train_platform_type)
     train_platform = train_platform_type(args.save_dir)
@@ -68,6 +72,10 @@ def main():
     model, diffusion = create_model_and_diffusion(args, data)
     model.to(dist_util.dev())
     model.rot2xyz.smpl_model.eval()
+
+    if args.pretrained_checkpoint != "":
+        from utils.model_util import load_pretrained_model
+        load_pretrained_model(model, args.pretrained_checkpoint)
 
     print('Total params: %.2fM' % (sum(p.numel() for p in model.parameters_wo_clip()) / 1000000.0))
     print("Training...")
