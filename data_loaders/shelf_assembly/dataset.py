@@ -1,4 +1,5 @@
 import copy
+import glob
 import json
 import os
 
@@ -34,55 +35,54 @@ class ShelfAssemblyDataset(data.Dataset):
 
     def load_motion_data(self, motion_dir, mode, device):
         data_list = []
-        dic = {}
-        flg = 0
-        for root, _, files in os.walk(motion_dir):
-            sorted_files = sorted(files)
-            for filename in sorted_files:
-                if mode == "action":
-                    if filename.lower().endswith(".npy") and filename[17:19] == "HH":
-                        no = int(filename[:6])
-                        main_sub = filename[22:26].replace("_", "")
-                        dic["no"] = no
-                        dic["main_sub"] = main_sub
+        file_pattern = os.path.join(motion_dir, "*.npz")
+        files = sorted(glob.glob(file_pattern))
+        
+        for filepath in tqdm(files, desc="Loading motion data"):
+            filename = os.path.basename(filepath)
+            if mode == "action":
+                # Check filename pattern if necessary (e.g. HH check)
+                if filename[17:19] == "HH":
+                    no = int(filename[:6])
+                    main_sub = filename[22:26].replace("_", "")
+                    dic = {}
+                    dic["no"] = no
+                    dic["main_sub"] = main_sub
 
-                        filepath = os.path.join(root, filename)
-                        if filename.lower().endswith("_global_orient.npy"):
-                            tensor = torch.tensor(np.load(filepath))
-                            dic["global_orient"] = matrix_to_rotation_6d(
-                                axis_angle_to_matrix(tensor)
-                            )
-                            flg |= 0b00001
-                        elif filename.lower().endswith("_root_pos.npy"):
-                            dic["root_pos"] = torch.tensor(
-                                np.load(filepath)
-                            )  # .to(device)
-                            flg |= 0b00010
-                        elif filename.lower().endswith("_body_pose.npy"):
-                            tensor = torch.tensor(np.load(filepath))
-                            dic["body_pose"] = matrix_to_rotation_6d(
-                                axis_angle_to_matrix(tensor)
-                            )
-                            flg |= 0b00100
-                        elif filename.lower().endswith("_right_hand_pose.npy"):
-                            tensor = torch.tensor(np.load(filepath))
-                            dic["right_hand_pose"] = matrix_to_rotation_6d(
-                                axis_angle_to_matrix(tensor)
-                            )
-                            flg |= 0b01000
-                        elif filename.lower().endswith("_left_hand_pose.npy"):
-                            tensor = torch.tensor(np.load(filepath))
-                            dic["left_hand_pose"] = matrix_to_rotation_6d(
-                                axis_angle_to_matrix(tensor)
-                            )
-                            flg |= 0b10000
-
-                        # save a file
-                        # idx = filename[:26]
-                        if flg == 0b11111:
-                            data_list.append(dic)
-                            flg = 0
-                            dic = {}
+                    try:
+                        data = np.load(filepath)
+                        
+                        # global_orient
+                        tensor = torch.tensor(data["global_orient"])
+                        dic["global_orient"] = matrix_to_rotation_6d(
+                            axis_angle_to_matrix(tensor)
+                        )
+                        
+                        # root_pos
+                        dic["root_pos"] = torch.tensor(data["root_pos"])
+                        
+                        # body_pose
+                        tensor = torch.tensor(data["body_pose"])
+                        dic["body_pose"] = matrix_to_rotation_6d(
+                            axis_angle_to_matrix(tensor)
+                        )
+                        
+                        # right_hand_pose
+                        tensor = torch.tensor(data["right_hand_pose"])
+                        dic["right_hand_pose"] = matrix_to_rotation_6d(
+                            axis_angle_to_matrix(tensor)
+                        )
+                        
+                        # left_hand_pose
+                        tensor = torch.tensor(data["left_hand_pose"])
+                        dic["left_hand_pose"] = matrix_to_rotation_6d(
+                            axis_angle_to_matrix(tensor)
+                        )
+                        
+                        data_list.append(dic)
+                    except Exception as e:
+                        print(f"Error loading {filepath}: {e}")
+                        continue
 
         return data_list
 

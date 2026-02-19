@@ -286,6 +286,28 @@ def train_args():
     add_model_options(parser)
     add_diffusion_options(parser)
     add_training_options(parser)
+
+    # Allow inheritance from pretrained_checkpoint
+    args_temp, _ = parser.parse_known_args()
+    if args_temp.pretrained_checkpoint != "" and os.path.exists(args_temp.pretrained_checkpoint):
+        args_path = os.path.join(os.path.dirname(args_temp.pretrained_checkpoint), 'args.json')
+        if os.path.exists(args_path):
+            print(f"Loading arguments from {args_path} for inheritance...")
+            with open(args_path, 'r') as fr:
+                model_args = json.load(fr)
+            
+            # Decide which groups to inherit
+            # We typically want to inherit model structure, diffusion params, and dataset config
+            # We usually DO NOT want to inherit training params (like save_dir, overwrite, etc.)
+            groups_to_inherit = ['dataset', 'model', 'diffusion']
+            keys_to_inherit = []
+            for group_name in groups_to_inherit:
+                keys_to_inherit += get_args_per_group_name(parser, args_temp, group_name)
+            
+            # Filter and set defaults
+            defaults_to_update = {k: v for k, v in model_args.items() if k in keys_to_inherit}
+            parser.set_defaults(**defaults_to_update)
+
     return apply_rules(parser.parse_args())
 
 
