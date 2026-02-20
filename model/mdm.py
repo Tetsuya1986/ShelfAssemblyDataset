@@ -91,6 +91,15 @@ class MDM(nn.Module):
                                                               activation=activation)
             self.seqTransDecoder = nn.TransformerDecoder(seqTransDecoderLayer,
                                                          num_layers=self.num_layers)
+            
+            print("HISTORY_ENC init (for conditional prediction)")
+            historyTransEncoderLayer = nn.TransformerEncoderLayer(d_model=self.latent_dim,
+                                                                  nhead=self.num_heads,
+                                                                  dim_feedforward=self.ff_size,
+                                                                  dropout=self.dropout,
+                                                                  activation=self.activation)
+            self.history_encoder = nn.TransformerEncoder(historyTransEncoderLayer,
+                                                         num_layers=self.num_layers)
         elif self.arch == 'gru':
             print("GRU init")
             self.gru = nn.GRU(self.latent_dim, self.latent_dim, num_layers=self.num_layers, batch_first=True)
@@ -228,6 +237,31 @@ class MDM(nn.Module):
             # unconstrained
             emb = time_emb
 
+        # --- History Conditioning ---
+        memory_mask = None
+        if 'history' in y:
+            history = y['history']
+            history = self.input_process(history)
+            history = self.sequence_pos_encoder(history)
+            history_emb = self.history_encoder(history)  # [history_len, bs, d]
+            
+            # Create a mask for history. `False` means the position is valid.
+            history_mask = torch.zeros((bs, history.shape[0]), dtype=torch.bool, device=x.device)
+            
+            orig_emb_len = emb.shape[0]
+            emb = torch.cat((emb, history_emb), dim=0)
+            
+            if 'text_mask' in locals():
+                memory_mask = torch.cat((text_mask, history_mask), dim=1)
+            else:
+                # clip / action / no_cond / add policy
+                orig_mask = torch.zeros((bs, orig_emb_len), dtype=torch.bool, device=x.device)
+                memory_mask = torch.cat((orig_mask, history_mask), dim=1)
+        else:
+            if 'text_mask' in locals():
+                memory_mask = text_mask
+        # ----------------------------
+
         if self.arch == 'gru':
             x_reshaped = x.reshape(bs, njoints*nfeats, 1, nframes)
             emb_gru = emb.repeat(nframes, 1, 1)     #[#frames, bs, d]
@@ -259,12 +293,7 @@ class MDM(nn.Module):
                 xseq = x
             xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, d]
 
-            if self.text_encoder_type == 'clip':
-                output = self.seqTransDecoder(tgt=xseq, memory=emb, tgt_key_padding_mask=frames_mask)
-            elif self.text_encoder_type == 'bert':
-                output = self.seqTransDecoder(tgt=xseq, memory=emb, memory_key_padding_mask=text_mask, tgt_key_padding_mask=frames_mask)  # Rotem's bug fix
-            else:
-                raise ValueError()
+            output = self.seqTransDecoder(tgt=xseq, memory=emb, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=frames_mask)
 
             if self.emb_trans_dec:
                 output = output[1:] # [seqlen, bs, d]

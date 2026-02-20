@@ -12,7 +12,7 @@ import torch
 from utils.parser_util import generate_args
 from utils.model_util import create_model_and_diffusion, load_saved_model
 from utils import dist_util
-from utils.sampler_util import ClassifierFreeSampleModel, AutoRegressiveSampler
+from utils.sampler_util import ClassifierFreeSampleModel, AutoRegressiveSampler, PredictionAutoRegressiveSampler
 from data_loaders.get_data import get_dataset_loader
 from data_loaders.humanml.scripts.motion_process import recover_from_ric, get_target_location, sample_goal
 import data_loaders.humanml.utils.paramUtil as paramUtil
@@ -104,18 +104,35 @@ def main(args=None):
         action_text = [s.replace('\n', '') for s in action_text]
         args.num_samples = len(action_text)
 
-    args.batch_size = args.num_samples  # Sampling a single batch from the testset, with exactly args.num_samples
+    if getattr(args, 'task', 'generation') == 'prediction' and getattr(args, 'autoregressive', False):
+        args.batch_size = 1
+        print('Loading dataset...')
+        data = load_dataset(args, max_frames, n_frames)
+        # Evaluate whole dataset for prediction conditionally
+        import sys
+        if '--num_samples' not in sys.argv:
+            args.num_samples = len(data.dataset)
+    else:
+        args.batch_size = args.num_samples  # Sampling a single batch from the testset, with exactly args.num_samples
+        print('Loading dataset...')
+        data = load_dataset(args, max_frames, n_frames)
 
-    print('Loading dataset...')
-    data = load_dataset(args, max_frames, n_frames)
     total_num_samples = args.num_samples * args.num_repetitions
 
     print("Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
 
+    is_prediction = getattr(args, 'task', 'generation') == 'prediction'
+    if is_prediction:
+        args.pred_len = int(getattr(args, 'prediction_seconds', 0) * fps)
+
     sample_fn = diffusion.p_sample_loop
     if args.autoregressive:
-        sample_cls = AutoRegressiveSampler(args, sample_fn, n_frames)
+        if is_prediction:
+            history_len = int(getattr(args, 'input_seconds', 0) * fps)
+            sample_cls = PredictionAutoRegressiveSampler(args, sample_fn, n_frames, history_len)
+        else:
+            sample_cls = AutoRegressiveSampler(args, sample_fn, n_frames)
         sample_fn = sample_cls.sample
 
     print(f"Loading checkpoints from [{args.model_path}]...")
@@ -126,9 +143,16 @@ def main(args=None):
     model.to(dist_util.dev())
     model.eval()  # disable random masking
 
-    motion_shape = (args.batch_size, model.njoints, model.nfeats, n_frames)
+    if is_prediction and args.autoregressive:
+        motion_shape = (args.batch_size, model.njoints, model.nfeats, args.pred_len)
+    else:
+        motion_shape = (args.batch_size, model.njoints, model.nfeats, n_frames)
 
-    if is_using_data:
+
+    if is_prediction and is_using_data:
+        # Evaluate whole dataset dynamically
+        iterator = iter(data)
+    elif is_using_data:
         iterator = iter(data)
         input_motion, model_kwargs = next(iterator)
         input_motion = input_motion.to(dist_util.dev())
@@ -138,91 +162,133 @@ def main(args=None):
         collate_args = [{'inp': torch.zeros(n_frames), 'tokens': None, 'lengths': n_frames}] * args.num_samples
         is_t2m = any([args.input_text, args.text_prompt])
         if is_t2m:
-            # t2m
             collate_args = [dict(arg, text=txt) for arg, txt in zip(collate_args, texts)]
         else:
-            # a2m
             action = data.dataset.action_name_to_action(action_text)
-            collate_args = [dict(arg, action=one_action, action_text=one_action_text) for
-                            arg, one_action, one_action_text in zip(collate_args, action, action_text)]
+            collate_args = [dict(arg, action=one_action, action_text=one_action_text) for arg, one_action, one_action_text in zip(collate_args, action, action_text)]
         _, model_kwargs = collate(collate_args)
+        
+        if is_prediction:
+            history_len = int(getattr(args, 'input_seconds', 0) * fps)
+            model_kwargs['y']['history'] = torch.zeros(args.batch_size, model.njoints, model.nfeats, history_len, device=dist_util.dev())
 
-    model_kwargs['y'] = {key: val.to(dist_util.dev()) if torch.is_tensor(val) else val for key, val in model_kwargs['y'].items()}
-    init_image = None    
-    
     all_motions = []
     all_lengths = []
     all_text = []
 
-    # add CFG scale to batch
-    if args.guidance_param != 1:
-        model_kwargs['y']['scale'] = torch.ones(args.batch_size, device=dist_util.dev()) * args.guidance_param
+    def run_generation_loop(input_motion, model_kwargs):
+        if input_motion is not None:
+            input_motion = input_motion.to(dist_util.dev())
+        
+        if is_prediction and input_motion is not None:
+            history_len = int(getattr(args, 'input_seconds', 0) * fps)
+            model_kwargs['y']['history'] = input_motion[..., :history_len]
+
+        model_kwargs['y'] = {key: val.to(dist_util.dev()) if torch.is_tensor(val) else val for key, val in model_kwargs['y'].items()}
+        init_image = None    
+
+        # add CFG scale to batch
+        if args.guidance_param != 1:
+            model_kwargs['y']['scale'] = torch.ones(args.batch_size, device=dist_util.dev()) * args.guidance_param
+        
+        if 'text' in model_kwargs['y'].keys():
+            # encoding once instead of each iteration saves lots of time
+            model_kwargs['y']['text_embed'] = model.encode_text(model_kwargs['y']['text'])
+        
+        if args.dynamic_text_path != '':
+            model_kwargs['y']['text'] = [model_kwargs['y']['text']] * args.num_samples
+            if args.text_encoder_type == 'bert':
+                model_kwargs['y']['text_embed'] = (model_kwargs['y']['text_embed'][0].unsqueeze(0).repeat(args.num_samples, 1, 1, 1), 
+                                                   model_kwargs['y']['text_embed'][1].unsqueeze(0).repeat(args.num_samples, 1, 1))
+            else:
+                raise NotImplementedError('DiP model only supports BERT text encoder at the moment. If you implement this, please send a PR!')
+        
+        for rep_i in range(args.num_repetitions):
+            print(f'### Sampling [repetitions #{rep_i}]')
+
+            sample = sample_fn(
+                model,
+                motion_shape,
+                clip_denoised=False,
+                model_kwargs=model_kwargs,
+                skip_timesteps=0,
+                init_image=init_image,
+                progress=True,
+                dump_steps=None,
+                noise=None,
+                const_noise=False,
+            )
+
+            # Recover XYZ *positions* from HumanML3D vector representation
+            if model.data_rep == 'hml_vec':
+                n_joints = 22 if sample.shape[1] == 263 else 21
+                sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
+                sample = recover_from_ric(sample, n_joints)
+                sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
+
+            rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
+            
+            if not args.autoregressive:
+                sample = sample[:,:,:,:model_kwargs['y']['mask'].shape[-1]]
+                
+            rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else torch.ones((args.batch_size, sample.shape[-1]), dtype=torch.bool, device=sample.device)
+
+            sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
+                                   jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                   get_rotations_back=False)
+
+            if args.unconstrained:
+                all_text.extend(['unconstrained'] * sample.shape[0])
+            else:
+                text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
+                all_text.extend(model_kwargs['y'][text_key])
+
+            # Zero pad or crop samples so they can be concatenated as a numpy array
+            sample_np = sample.detach().cpu().numpy()
+            
+            # Since variable lengths might generate different max_shapes per batch dynamically:
+            max_overall_frames = sample_np.shape[-1]
+            if is_prediction and is_using_data:
+                _len = model_kwargs['y']['lengths'].cpu().numpy()
+            elif args.autoregressive:
+                _len = np.array([sample.shape[-1]] * args.batch_size)
+            else:
+                _len = model_kwargs['y']['lengths'].cpu().numpy()
+                if 'prefix' in model_kwargs['y'].keys():
+                    _len[:] = sample.shape[-1]
+            all_lengths.append(_len)
+            
+            # Append as list of arrays. We will concatenate properly at the end.
+            all_motions.append(sample_np)
+            print(f"created {len(all_motions) * args.batch_size} batches of samples")
+
+    if is_prediction and is_using_data:
+        generated_samples = 0
+        for input_motion, model_kwargs in iterator:
+            if generated_samples >= total_num_samples:
+                break
+            run_generation_loop(input_motion, model_kwargs)
+            generated_samples += args.batch_size
+    else:
+        run_generation_loop(input_motion if is_using_data else None, model_kwargs)
+
+    # Calculate overall max frames across all batches
+    max_len = max([m.shape[-1] for m in all_motions])
+    padded_motions = []
+    for m in all_motions:
+        if m.shape[-1] < max_len:
+            pad = np.zeros((*m.shape[:-1], max_len - m.shape[-1]), dtype=m.dtype)
+            m = np.concatenate([m, pad], axis=-1)
+        padded_motions.append(m)
+
+    all_motions = np.concatenate(padded_motions, axis=0)
+    all_lengths = np.concatenate(all_lengths, axis=0)
     
-    if 'text' in model_kwargs['y'].keys():
-        # encoding once instead of each iteration saves lots of time
-        model_kwargs['y']['text_embed'] = model.encode_text(model_kwargs['y']['text'])
-    
-    if args.dynamic_text_path != '':
-        # Rearange the text to match the autoregressive sampling - each prompt fits to a single prediction
-        # Which is 2 seconds of motion by default
-        model_kwargs['y']['text'] = [model_kwargs['y']['text']] * args.num_samples
-        if args.text_encoder_type == 'bert':
-            model_kwargs['y']['text_embed'] = (model_kwargs['y']['text_embed'][0].unsqueeze(0).repeat(args.num_samples, 1, 1, 1), 
-                                               model_kwargs['y']['text_embed'][1].unsqueeze(0).repeat(args.num_samples, 1, 1))
-        else:
-            raise NotImplementedError('DiP model only supports BERT text encoder at the moment. If you implement this, please send a PR!')
-    
-    for rep_i in range(args.num_repetitions):
-        print(f'### Sampling [repetitions #{rep_i}]')
-
-        sample = sample_fn(
-            model,
-            motion_shape,
-            clip_denoised=False,
-            model_kwargs=model_kwargs,
-            skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-            init_image=init_image,
-            progress=True,
-            dump_steps=None,
-            noise=None,
-            const_noise=False,
-        )
-
-        # Recover XYZ *positions* from HumanML3D vector representation
-        if model.data_rep == 'hml_vec':
-            n_joints = 22 if sample.shape[1] == 263 else 21
-            sample = data.dataset.t2m_dataset.inv_transform(sample.cpu().permute(0, 2, 3, 1)).float()
-            sample = recover_from_ric(sample, n_joints)
-            sample = sample.view(-1, *sample.shape[2:]).permute(0, 2, 3, 1)
-
-        rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
-        # rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, n_frames).bool()
-        rot2xyz_mask = None if rot2xyz_pose_rep == 'xyz' else model_kwargs['y']['mask'].reshape(args.batch_size, model_kwargs['y']['mask'].shape[-1]).bool()
-        sample = sample[:,:,:,:model_kwargs['y']['mask'].shape[-1]]
-
-        sample = model.rot2xyz(x=sample, mask=rot2xyz_mask, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                               jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
-                               get_rotations_back=False)
-
-        if args.unconstrained:
-            all_text += ['unconstrained'] * args.num_samples
-        else:
-            text_key = 'text' if 'text' in model_kwargs['y'] else 'action_text'
-            all_text += model_kwargs['y'][text_key]
-
-        all_motions.append(sample.detach().cpu().numpy())
-        _len = model_kwargs['y']['lengths'].cpu().numpy()
-        if 'prefix' in model_kwargs['y'].keys():
-            _len[:] = sample.shape[-1]
-        all_lengths.append(_len)
-
-        print(f"created {len(all_motions) * args.batch_size} samples")
-
-
-    all_motions = np.concatenate(all_motions, axis=0)
-    all_motions = all_motions[:total_num_samples]  # [bs, njoints, 6, seqlen]
-    all_text = all_text[:total_num_samples]
-    all_lengths = np.concatenate(all_lengths, axis=0)[:total_num_samples]
+    # Do not cutoff based on total_num_samples anymore if prediction dataset traversal
+    if not (is_prediction and is_using_data):
+        all_motions = all_motions[:total_num_samples]  # [bs, njoints, 6, seqlen]
+        all_text = all_text[:total_num_samples]
+        all_lengths = all_lengths[:total_num_samples]
 
     if os.path.exists(out_path):
         shutil.rmtree(out_path)
@@ -271,19 +337,35 @@ def main(args=None):
 
             # Trim / freeze motion if needed
             length = all_lengths[rep_i*args.batch_size + sample_i]
-            motion = all_motions[rep_i*args.batch_size + sample_i].transpose(2, 0, 1)[:max_length]
-            if motion.shape[0] > length:
-                motion[length:-1] = motion[length-1]  # duplicate the last frame to end of motion, so all motions will be in equal length
+            
+            # Autoregressive mode: Variable lengths should render true to size without duplicating frames.
+            if getattr(args, 'autoregressive', False):
+                motion = all_motions[rep_i*args.batch_size + sample_i].transpose(2, 0, 1)[:length]
+            else:
+                motion = all_motions[rep_i*args.batch_size + sample_i].transpose(2, 0, 1)[:max_length]
+                if motion.shape[0] > length:
+                    motion[length:-1] = motion[length-1]  # duplicate the last frame to end of motion, so all motions will be in equal length
 
             save_file = sample_file_template.format(sample_i, rep_i)
             animation_save_path = os.path.join(out_path, save_file)
             gt_frames = np.arange(args.context_len) if args.context_len > 0 and not args.autoregressive else []
-            animations[sample_i, rep_i] = plot_3d_motion(animation_save_path, 
-                                                         skeleton, motion, dataset=args.dataset, title=caption, 
-                                                         fps=fps, gt_frames=gt_frames)
+            animation = plot_3d_motion(animation_save_path, 
+                                       skeleton, motion, dataset=args.dataset, title=caption, 
+                                       fps=fps, gt_frames=gt_frames)
+            animations[sample_i, rep_i] = animation
             rep_files.append(animation_save_path)
+            
+            if getattr(args, 'autoregressive', False):
+                # Save just this single clip at exactly its intrinsic frame length
+                animation.duration = length / fps
+                print(f'saving {os.path.split(out_path)[1]}/{save_file}')
+                animation.write_videofile(animation_save_path, fps=fps, threads=4, logger=None)
+                animation.close()
 
-    save_multiple_samples(out_path, {'all': all_file_template}, animations, fps, max(list(all_lengths) + [n_frames]))
+    if getattr(args, 'autoregressive', False):
+        pass # Animations are already written individually above
+    else:
+        save_multiple_samples(out_path, {'all': all_file_template}, animations, fps, max(list(all_lengths) + [n_frames]))
 
     abs_path = os.path.abspath(out_path)
     print(f'[Done] Results are at [{abs_path}]')
@@ -344,8 +426,12 @@ def load_dataset(args, max_frames, n_frames):
                               batch_size=args.batch_size,
                               num_frames=max_frames,
                               split='test',
-                              # hml_mode='action' if args.pred_len > 0 else 'text_only',  # We need to sample a prefix from the dataset
                               hml_mode='action',
+                              task=getattr(args, 'task', 'generation'),
+                              input_seconds=getattr(args, 'input_seconds', 0.0),
+                              prediction_seconds=getattr(args, 'prediction_seconds', 0.0),
+                              stride=getattr(args, 'stride', 0.0),
+                              autoregressive=getattr(args, 'autoregressive', False),
                               fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev())
     data.fixed_length = n_frames
     return data

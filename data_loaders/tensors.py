@@ -104,10 +104,13 @@ def shelf_assembly_collate(batch):
         root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
         root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
         
-        adapted_batch.append({
+        d = {
             'inp': torch.cat([root_pos, global_orient, b[0]['body_pose'], b[0]['right_hand_pose'], b[0]['left_hand_pose']], dim=1).float(),
             'text': b[1]['caption']
-        })
+        }
+        if 'valid_length' in b[1]:
+            d['lengths'] = b[1]['valid_length']
+        adapted_batch.append(d)
 
     # Change order
     # from : [batch_size, frames, njoints, nfeats]

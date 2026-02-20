@@ -24,6 +24,8 @@ class ShelfAssemblyDataset(data.Dataset):
         device = kwargs.get("device", None)
         self.opt = get_opt(dataset_opt_path, device)
         
+        self.is_autoregressive = kwargs.get('autoregressive', False)
+        
         # Save prediction-specific parameters directly to self, not opt
         if self.task == "prediction":
             self.input_seconds = kwargs["input_seconds"]
@@ -239,57 +241,54 @@ class ShelfAssemblyDataset(data.Dataset):
                     input_size_frames = int(self.input_seconds * fps)
                     action_len = e_frame - s_frame + 1
                     
-                    if action_len < input_size_frames:
+                    if action_len <= input_size_frames:
                         continue # Skip actions shorter than input length
                     
-                    # Sliding window
-                    for current_start in range(s_frame, e_frame - input_size_frames + 2, stride_frames):
-                        current_end = current_start + window_size_frames - 1
-                        
-                        real_end = min(current_end, e_frame)
-                        valid_length = real_end - current_start + 1
-                        pad_length = window_size_frames - valid_length
+                    if not self.is_autoregressive:
+                        # Sliding window
+                        for current_start in range(s_frame, e_frame - input_size_frames + 1, stride_frames):
+                            current_end = current_start + window_size_frames - 1
                             
-                        mdic = copy.deepcopy(base_mdic)
+                            real_end = min(current_end, e_frame)
+                            valid_length = real_end - current_start + 1
+                            pad_length = window_size_frames - valid_length
+                                
+                            mdic = copy.deepcopy(base_mdic)
+                            
+                            # Extract the valid portion
+                            body_pose = mo["body_pose"][current_start : real_end + 1]
+                            global_orient = mo["global_orient"][current_start : real_end + 1]
+                            left_hand_pose = mo["left_hand_pose"][current_start : real_end + 1]
+                            right_hand_pose = mo["right_hand_pose"][current_start : real_end + 1]
+                            root_pos = mo["root_pos"][current_start : real_end + 1]
+                            
+                            # Pad with zeros if necessary along the frame dimension
+                            def pad_tensor(t):
+                                if pad_length > 0:
+                                    padding = [0, 0] * (t.dim() - 1) + [0, pad_length]
+                                    return F.pad(t, padding, mode='constant', value=0)
+                                return t
+    
+                            mdic["body_pose"] = pad_tensor(body_pose)
+                            mdic["global_orient"] = pad_tensor(global_orient)
+                            mdic["left_hand_pose"] = pad_tensor(left_hand_pose)
+                            mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
+                            mdic["root_pos"] = pad_tensor(root_pos)
+                            
+                            motion_list.append(mdic)
+                            
+                            adic = copy.deepcopy(base_adic)
+                            # Store timing info for debugging/reference
+                            adic["clip_start_frame"] = current_start
+                            adic["clip_end_frame"] = real_end
+                            adic["valid_length"] = valid_length
+                            adic["pad_length"] = pad_length
+                            annotation_list.append(adic)
                         
-                        # Extract the valid portion
-                        body_pose = mo["body_pose"][current_start : real_end + 1]
-                        global_orient = mo["global_orient"][current_start : real_end + 1]
-                        left_hand_pose = mo["left_hand_pose"][current_start : real_end + 1]
-                        right_hand_pose = mo["right_hand_pose"][current_start : real_end + 1]
-                        root_pos = mo["root_pos"][current_start : real_end + 1]
-                        
-                        # Pad with zeros if necessary along the frame dimension
-                        def pad_tensor(t):
-                            if pad_length > 0:
-                                # F.pad pads from the last dimension backwards.
-                                # For shape (frames, ...), we only want to pad the 'frames' dim, which is at the front.
-                                # To pad the front dimension (dim 0), we need to provide (0,0) for all trailing dims,
-                                # and then (0, pad_length) for dim 0.
-                                padding = [0, 0] * (t.dim() - 1) + [0, pad_length]
-                                return F.pad(t, padding, mode='constant', value=0)
-                            return t
-
-                        mdic["body_pose"] = pad_tensor(body_pose)
-                        mdic["global_orient"] = pad_tensor(global_orient)
-                        mdic["left_hand_pose"] = pad_tensor(left_hand_pose)
-                        mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
-                        mdic["root_pos"] = pad_tensor(root_pos)
-                        
-                        motion_list.append(mdic)
-                        
-                        adic = copy.deepcopy(base_adic)
-                        # Store timing info for debugging/reference
-                        adic["clip_start_frame"] = current_start
-                        adic["clip_end_frame"] = real_end
-                        adic["valid_length"] = valid_length
-                        adic["pad_length"] = pad_length
-                        annotation_list.append(adic)
-                    
-                    continue # Done with this action for prediction mode
+                        continue # Done with this action for prediction mode
 
                 # Normal mode logic (unchanged)
-                if s_frame + max_len - 1 < e_frame:
+                if not self.is_autoregressive and s_frame + max_len - 1 < e_frame:
                     e_frame = s_frame + max_len - 1
 
                 mdic = copy.deepcopy(base_mdic)
@@ -309,6 +308,7 @@ class ShelfAssemblyDataset(data.Dataset):
                 motion_list.append(mdic)
 
                 adic = copy.deepcopy(base_adic)
+                adic["valid_length"] = e_frame - s_frame + 1
                 annotation_list.append(adic)
 
         return motion_list, annotation_list
