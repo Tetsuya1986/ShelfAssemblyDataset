@@ -25,7 +25,11 @@ class ShelfAssemblyDataset(data.Dataset):
         self.opt = get_opt(dataset_opt_path, device)
         
         self.is_autoregressive = kwargs.get('autoregressive', False)
+        self.split = split
         
+        # Load split IDs
+        self.split_ids = self.load_split_ids(os.path.join(abs_base_path, f"dataset/shelf_assembly_{self.split}.txt"))
+
         # Save prediction-specific parameters directly to self, not opt
         if self.task == "prediction":
             self.input_seconds = kwargs["input_seconds"]
@@ -33,7 +37,7 @@ class ShelfAssemblyDataset(data.Dataset):
             self.stride = kwargs["stride"]
             
 
-        print(f"Loading dataset {self.opt.dataset_name} ...")
+        print(f"Loading dataset {self.opt.dataset_name} (split: {self.split}) ...")
         self.motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
         self.annotation = self.load_annotation(self.opt.text_dir, mode, device)
         # max_frames = self.opt.max_motion_length
@@ -44,6 +48,15 @@ class ShelfAssemblyDataset(data.Dataset):
             mode, self.motion_data, self.annotation, fps, max_len, device
         )
 
+    def load_split_ids(self, split_file_path):
+        split_ids = set()
+        with open(split_file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    split_ids.add(int(line))
+        return split_ids
+
     def load_motion_data(self, motion_dir, mode, device):
         data_list = []
         file_pattern = os.path.join(motion_dir, "*.npz")
@@ -53,8 +66,13 @@ class ShelfAssemblyDataset(data.Dataset):
             filename = os.path.basename(filepath)
             if mode == "action":
                 # Check filename pattern if necessary (e.g. HH check)
-                if filename[17:19] == "HH":
+                if len(filename) >= 19 and filename[17:19] == "HH":
                     no = int(filename[:6])
+                        
+                    # Filter by split
+                    if no not in self.split_ids:
+                        continue
+
                     main_sub = filename[22:26].replace("_", "")
                     dic = {}
                     dic["no"] = no
@@ -105,8 +123,15 @@ class ShelfAssemblyDataset(data.Dataset):
                 if mode == "action":
                     if (
                         filename.lower().endswith("_action.json")
+                        and len(filename) >= 19
                         and filename[17:19] == "HH"
                     ):
+                        no = int(filename[:6])
+                            
+                        # Filter by split
+                        if no not in self.split_ids:
+                            continue
+
                         filepath = os.path.join(root, filename)
                         with open(filepath, "r") as f:
                             data = json.load(f)
