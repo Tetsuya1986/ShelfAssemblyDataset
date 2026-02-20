@@ -6,6 +6,7 @@ import os
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils import data
 from tqdm import tqdm
 
@@ -15,20 +16,28 @@ from utils.rotation_conversions import axis_angle_to_matrix, matrix_to_rotation_
 
 class ShelfAssemblyDataset(data.Dataset):
     def __init__(
-        self, mode, datapath="./dataset/shelf_assembly_opt.txt", split="train", **kwargs
+        self, mode, datapath="./dataset/shelf_assembly_opt.txt", split="train", task="generation", **kwargs
     ):
+        self.task = task
         abs_base_path = kwargs.get("abs_path", ".")
         dataset_opt_path = os.path.join(abs_base_path, datapath)
         device = kwargs.get("device", None)
-        opt = get_opt(dataset_opt_path, device)
-        max_frames = opt.max_motion_length
+        self.opt = get_opt(dataset_opt_path, device)
+        
+        # Save prediction-specific parameters directly to self, not opt
+        if self.task == "prediction":
+            self.input_seconds = kwargs["input_seconds"]
+            self.prediction_seconds = kwargs["prediction_seconds"]
+            self.stride = kwargs["stride"]
+            
 
-        print(f"Loading dataset {opt.dataset_name} ...")
-        self.motion_data = self.load_motion_data(opt.motion_dir, mode, device)
-        self.annotation = self.load_annotation(opt.text_dir, mode, device)
-        # headcam_img = self.load_headcam_img(opt.headcam_dir, mode, annotation, max_frames, device)
-        fps = opt.fps
-        max_len = opt.max_motion_length
+        print(f"Loading dataset {self.opt.dataset_name} ...")
+        self.motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
+        self.annotation = self.load_annotation(self.opt.text_dir, mode, device)
+        # max_frames = self.opt.max_motion_length
+        # headcam_img = self.load_headcam_img(self.opt.headcam_dir, mode, annotation, max_frames, device)
+        fps = self.opt.fps
+        max_len = self.opt.max_motion_length
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
             mode, self.motion_data, self.annotation, fps, max_len, device
         )
@@ -192,6 +201,11 @@ class ShelfAssemblyDataset(data.Dataset):
 
         motion_list = []
         annotation_list = []
+        
+        if self.task == 'prediction':
+            window_size_frames = int((self.input_seconds + self.prediction_seconds) * fps)
+            stride_frames = int(self.stride * fps)
+
         for ann, mo in tqdm(zip(annotation, motion), desc="extract"):
             assert ann["no"] == mo["no"]
             assert ann["main_sub"] == mo["main_sub"]
@@ -205,13 +219,80 @@ class ShelfAssemblyDataset(data.Dataset):
                 end_sec = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
                 s_frame = int(start_sec * fps)
                 e_frame = int(end_sec * fps)
+                
+                base_adic = {
+                    "no": ann["no"],
+                    "shelf_id": ann["shelf_id"],
+                    "ass_dis": ann["ass_dis"],
+                    "main_sub": ann["main_sub"],
+                    "caption": f'{act["action_verb"]} {act["action_noun"]}',
+                    "caption_verb": act["action_verb"],
+                }
+                
+                base_mdic = {
+                    "no": mo["no"],
+                    "main_sub": mo["main_sub"]
+                }
+                
+                # Logic for prediction mode
+                if self.task == 'prediction':
+                    input_size_frames = int(self.input_seconds * fps)
+                    action_len = e_frame - s_frame + 1
+                    
+                    if action_len < input_size_frames:
+                        continue # Skip actions shorter than input length
+                    
+                    # Sliding window
+                    for current_start in range(s_frame, e_frame - input_size_frames + 2, stride_frames):
+                        current_end = current_start + window_size_frames - 1
+                        
+                        real_end = min(current_end, e_frame)
+                        valid_length = real_end - current_start + 1
+                        pad_length = window_size_frames - valid_length
+                            
+                        mdic = copy.deepcopy(base_mdic)
+                        
+                        # Extract the valid portion
+                        body_pose = mo["body_pose"][current_start : real_end + 1]
+                        global_orient = mo["global_orient"][current_start : real_end + 1]
+                        left_hand_pose = mo["left_hand_pose"][current_start : real_end + 1]
+                        right_hand_pose = mo["right_hand_pose"][current_start : real_end + 1]
+                        root_pos = mo["root_pos"][current_start : real_end + 1]
+                        
+                        # Pad with zeros if necessary along the frame dimension
+                        def pad_tensor(t):
+                            if pad_length > 0:
+                                # F.pad pads from the last dimension backwards.
+                                # For shape (frames, ...), we only want to pad the 'frames' dim, which is at the front.
+                                # To pad the front dimension (dim 0), we need to provide (0,0) for all trailing dims,
+                                # and then (0, pad_length) for dim 0.
+                                padding = [0, 0] * (t.dim() - 1) + [0, pad_length]
+                                return F.pad(t, padding, mode='constant', value=0)
+                            return t
 
+                        mdic["body_pose"] = pad_tensor(body_pose)
+                        mdic["global_orient"] = pad_tensor(global_orient)
+                        mdic["left_hand_pose"] = pad_tensor(left_hand_pose)
+                        mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
+                        mdic["root_pos"] = pad_tensor(root_pos)
+                        
+                        motion_list.append(mdic)
+                        
+                        adic = copy.deepcopy(base_adic)
+                        # Store timing info for debugging/reference
+                        adic["clip_start_frame"] = current_start
+                        adic["clip_end_frame"] = real_end
+                        adic["valid_length"] = valid_length
+                        adic["pad_length"] = pad_length
+                        annotation_list.append(adic)
+                    
+                    continue # Done with this action for prediction mode
+
+                # Normal mode logic (unchanged)
                 if s_frame + max_len - 1 < e_frame:
                     e_frame = s_frame + max_len - 1
 
-                mdic = {}
-                mdic["no"] = mo["no"]
-                mdic["main_sub"] = mo["main_sub"]
+                mdic = copy.deepcopy(base_mdic)
                 mdic["body_pose"] = mo["body_pose"][
                     s_frame : e_frame + 1
                 ]  # .to(device)
@@ -227,13 +308,7 @@ class ShelfAssemblyDataset(data.Dataset):
                 mdic["root_pos"] = mo["root_pos"][s_frame : e_frame + 1]  # .to(device)
                 motion_list.append(mdic)
 
-                adic = {}
-                adic["no"] = ann["no"]
-                adic["shelf_id"] = ann["shelf_id"]
-                adic["ass_dis"] = ann["ass_dis"]
-                adic["main_sub"] = ann["main_sub"]
-                adic["caption"] = act["action_verb"] + " " + act["action_noun"]
-                adic["caption_verb"] = act["action_verb"]
+                adic = copy.deepcopy(base_adic)
                 annotation_list.append(adic)
 
         return motion_list, annotation_list

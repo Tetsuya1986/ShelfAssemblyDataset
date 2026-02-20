@@ -52,6 +52,13 @@ def apply_rules(args):
     # For target conditioning
     if args.lambda_target_loc > 0.:
         args.multi_target_cond = True
+        
+    # Clear prediction parameters if not in prediction task
+    if hasattr(args, 'task') and args.task != 'prediction':
+        args.input_seconds = None
+        args.prediction_seconds = None
+        args.stride = None
+        
     return args
 
 
@@ -141,6 +148,14 @@ def add_data_options(parser):
                        help="Dataset name (choose from list).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
+    group.add_argument("--task", default='generation', choices=['generation', 'prediction'], type=str,
+                       help="Task type: generation or prediction.")
+    group.add_argument("--input_seconds", default=0.5, type=float,
+                       help="Input/history window size in seconds (for prediction mode).")
+    group.add_argument("--prediction_seconds", default=1.0, type=float,
+                       help="Prediction window size in seconds (for prediction mode).")
+    group.add_argument("--stride", default=0.5, type=float,
+                       help="Stride in seconds for sliding window (for prediction mode).")
 
 
 def add_training_options(parser):
