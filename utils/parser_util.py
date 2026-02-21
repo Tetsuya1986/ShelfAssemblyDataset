@@ -41,7 +41,8 @@ def load_args_from_model(args, args_to_overwrite):
             setattr(args, 'unconstrained', unconstrained)
 
         else:
-            print('Warning: was not able to load [{}], using default value [{}] instead.'.format(a, args.__dict__[a]))
+            if a not in ['split', 'num_eval_samples']:
+                print('Warning: was not able to load [{}], using default value [{}] instead.'.format(a, args.__dict__[a]))
     return args
 
 def apply_rules(args):
@@ -148,6 +149,8 @@ def add_data_options(parser):
                        help="Dataset name (choose from list).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
+    group.add_argument("--split", default="train", type=str,
+                       help="Dataset split to evaluate on (e.g. train, test, val).")
     group.add_argument("--task", default='generation', choices=['generation', 'prediction'], type=str,
                        help="Task type: generation or prediction.")
     group.add_argument("--input_seconds", default=0.5, type=float,
@@ -229,6 +232,8 @@ def add_sampling_options(parser):
     group.add_argument("--autoregressive_include_prefix", action='store_true', help="If true, include the init prefix in the output, otherwise, will drop it.")
     group.add_argument("--autoregressive_init", default='data', type=str, choices=['data', 'isaac'], 
                         help="Sets the source of the init frames, either from the dataset or isaac init poses.")
+    group.add_argument("--num_eval_samples", default=None, type=int,
+                       help="Maximal number of samples to evaluate for debugging. If None, evaluates all.")
 
 def add_generate_options(parser):
     group = parser.add_argument_group('generate')
@@ -282,6 +287,8 @@ def add_evaluation_options(parser):
                         help="Sets the source of the init frames, either from the dataset or isaac init poses.")
     group.add_argument("--guidance_param", default=2.5, type=float,
                        help="For classifier-free sampling - specifies the s parameter, as defined in the paper.")
+    group.add_argument("--num_eval_samples", default=None, type=int,
+                       help="Maximal number of samples to evaluate for debugging. If None, evaluates all.")
 
 
 def get_cond_mode(args):
