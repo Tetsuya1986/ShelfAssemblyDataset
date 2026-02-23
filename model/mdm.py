@@ -125,7 +125,8 @@ class MDM(nn.Module):
                     # assert self.emb_trans_dec == False # passing just the time embed so it's fine
                     print("Loading BERT...")
                     # bert_model_path = 'model/BERT/distilbert-base-uncased'
-                    bert_model_path = 'distilbert/distilbert-base-uncased'
+                    # bert_model_path = 'distilbert/distilbert-base-uncased'
+                    bert_model_path = 'distilbert-base-uncased'
                     self.clip_model = load_bert(bert_model_path)  # Sorry for that, the naming is for backward compatibility
                     self.encode_text = self.bert_encode_text
                     self.clip_dim = 768

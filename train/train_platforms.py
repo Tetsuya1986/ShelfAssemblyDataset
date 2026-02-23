@@ -61,13 +61,13 @@ class WandBPlatform(TrainPlatform):
     def __init__(self, save_dir, config=None, *args, **kwargs):
         super().__init__(save_dir, *args, **kwargs)
         # self.wandb.login(host=os.getenv("WANDB_BASE_URL"), key=os.getenv("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"))
-        self.wandb.login(key=os.getenv("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"))
+        # self.wandb.login(key=os.getenv("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"))
         self.wandb.init(
             project='MotionDiffusion',
             name=self.name,
             id=self.name,  # in order to send continued runs to the same record
             resume='allow',  # in order to send continued runs to the same record
-            entity='umagami',  # will use your default entity if not set
+            entity='tetsuya1986',  # will use your default entity if not set
             save_code=True,
             config=config)  # config can also be sent via report_args()
 

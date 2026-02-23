@@ -72,7 +72,8 @@ def get_opt(opt_path, device):
         opt.data_root = '/data/utsubo0/users/narita/shelf_assembly/shelf_assembly_dataset'
         opt.motion_dir = pjoin(opt.data_root, 'smpl-x')
         opt.text_dir = pjoin(opt.data_root, 'annotation')
-        opt.headcam_dir = pjoin(opt.data_root, 'headcam')
+        opt.headcam_dir = pjoin(opt.data_root, 'headcam_img')
+        opt.envcam_dir = pjoin(opt.data_root, 'envcam_img')
         opt.joints_num = 51
         opt.dim_pose = 251
         opt.max_motion_length = 300

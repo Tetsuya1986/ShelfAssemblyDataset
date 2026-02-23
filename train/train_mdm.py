@@ -70,7 +70,9 @@ def main():
                               task=args.task,
                               input_seconds=args.input_seconds,
                               prediction_seconds=args.prediction_seconds,
-                              stride=args.stride)
+                              stride=args.stride,
+                              head_cam_fps = args.head_cam_fps,
+                              env_cam_fps = args.env_cam_fps)
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
