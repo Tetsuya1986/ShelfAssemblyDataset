@@ -12,7 +12,11 @@ class Rotation2xyz:
     def __init__(self, device, dataset='amass'):
         self.device = device
         self.dataset = dataset
-        self.smpl_model = SMPL().eval().to(device)
+        if dataset == 'shelf_assembly':
+            from utils.config import SMPLX_MODEL_PATH
+            self.smpl_model = SMPL(model_path=SMPLX_MODEL_PATH, model_type='smplx', use_pca=False).eval().to(device)
+        else:
+            self.smpl_model = SMPL().eval().to(device)
 
     def __call__(self, x, mask, pose_rep, translation, glob,
                  jointstype, vertstrans, betas=None, beta=0,
@@ -30,8 +34,12 @@ class Rotation2xyz:
             raise NotImplementedError("This jointstype is not implemented.")
 
         if translation:
-            x_translations = x[:, -1, :3]
-            x_rotations = x[:, :-1]
+            if self.dataset == 'shelf_assembly':
+                x_translations = x[:, 0, :3]
+                x_rotations = x[:, 1:]
+            else:
+                x_translations = x[:, -1, :3]
+                x_rotations = x[:, :-1]
         else:
             x_rotations = x
 
@@ -46,7 +54,6 @@ class Rotation2xyz:
         elif pose_rep == "rotquat":
             rotations = geometry.quaternion_to_matrix(x_rotations[mask])
         elif pose_rep == "rot6d":
-            import pdb; pdb.set_trace()
             rotations = geometry.rotation_6d_to_matrix(x_rotations[mask])
         else:
             raise NotImplementedError("No geometry for this one.")
@@ -59,12 +66,34 @@ class Rotation2xyz:
             global_orient = rotations[:, 0]
             rotations = rotations[:, 1:]
 
+        if self.dataset == 'shelf_assembly':
+            # split rotations: body (21), right hand (15), left hand (15)
+            # Total 51 joints in `rotations`
+            body_pose = rotations[:, :21]
+            right_hand_pose = rotations[:, 21:36]
+            left_hand_pose = rotations[:, 36:51]
+
+            # Convert to axis-angle and flatten for SMPL-X
+            N_masked = rotations.shape[0]
+            body_pose = geometry.matrix_to_axis_angle(body_pose).view(N_masked, -1)
+            right_hand_pose = geometry.matrix_to_axis_angle(right_hand_pose).view(N_masked, -1)
+            left_hand_pose = geometry.matrix_to_axis_angle(left_hand_pose).view(N_masked, -1)
+            global_orient = geometry.matrix_to_axis_angle(global_orient).view(N_masked, -1)
+
+            hand_kwargs = {
+                'left_hand_pose': left_hand_pose,
+                'right_hand_pose': right_hand_pose
+            }
+        else:
+            body_pose = rotations
+            hand_kwargs = {}
+
         if betas is None:
-            betas = torch.zeros([rotations.shape[0], self.smpl_model.num_betas],
+            betas = torch.zeros([body_pose.shape[0], self.smpl_model.num_betas],
                                 dtype=rotations.dtype, device=rotations.device)
             betas[:, 1] = beta
             # import ipdb; ipdb.set_trace()
-        out = self.smpl_model(body_pose=rotations, global_orient=global_orient, betas=betas)
+        out = self.smpl_model(body_pose=body_pose, global_orient=global_orient, betas=betas, **hand_kwargs)
 
         # get the desirable joints
         joints = out[jointstype]

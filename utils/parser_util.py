@@ -41,7 +41,8 @@ def load_args_from_model(args, args_to_overwrite):
             setattr(args, 'unconstrained', unconstrained)
 
         else:
-            print('Warning: was not able to load [{}], using default value [{}] instead.'.format(a, args.__dict__[a]))
+            if a not in ['split', 'num_eval_samples']:
+                print('Warning: was not able to load [{}], using default value [{}] instead.'.format(a, args.__dict__[a]))
     return args
 
 def apply_rules(args):
@@ -52,6 +53,13 @@ def apply_rules(args):
     # For target conditioning
     if args.lambda_target_loc > 0.:
         args.multi_target_cond = True
+        
+    # Clear prediction parameters if not in prediction task
+    if hasattr(args, 'task') and args.task != 'prediction':
+        args.input_seconds = None
+        args.prediction_seconds = None
+        args.stride = None
+        
     return args
 
 
@@ -141,6 +149,16 @@ def add_data_options(parser):
                        help="Dataset name (choose from list).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
+    group.add_argument("--split", default="train", type=str,
+                       help="Dataset split to evaluate on (e.g. train, test, val).")
+    group.add_argument("--task", default='generation', choices=['generation', 'prediction'], type=str,
+                       help="Task type: generation or prediction.")
+    group.add_argument("--input_seconds", default=0.5, type=float,
+                       help="Input/history window size in seconds (for prediction mode).")
+    group.add_argument("--prediction_seconds", default=1.0, type=float,
+                       help="Prediction window size in seconds (for prediction mode).")
+    group.add_argument("--stride", default=0.5, type=float,
+                       help="Stride in seconds for sliding window (for prediction mode).")
 
 
 def add_training_options(parser):
@@ -173,6 +191,8 @@ def add_training_options(parser):
                        help="Limit for the maximal number of frames. In HumanML3D and KIT this field is ignored.")
     group.add_argument("--resume_checkpoint", default="", type=str,
                        help="If not empty, will start from the specified checkpoint (path to model###.pt file).")
+    group.add_argument("--pretrained_checkpoint", default="", type=str,
+                       help="If not empty, will load weights from this checkpoint excluding mismatched layers.")
     
     group.add_argument("--gen_during_training", action='store_true',
                        help="If True, will generate motions during training, on each save interval.")
@@ -212,6 +232,8 @@ def add_sampling_options(parser):
     group.add_argument("--autoregressive_include_prefix", action='store_true', help="If true, include the init prefix in the output, otherwise, will drop it.")
     group.add_argument("--autoregressive_init", default='data', type=str, choices=['data', 'isaac'], 
                         help="Sets the source of the init frames, either from the dataset or isaac init poses.")
+    group.add_argument("--num_eval_samples", default=None, type=int,
+                       help="Maximal number of samples to evaluate for debugging. If None, evaluates all.")
 
 def add_generate_options(parser):
     group = parser.add_argument_group('generate')
@@ -265,6 +287,8 @@ def add_evaluation_options(parser):
                         help="Sets the source of the init frames, either from the dataset or isaac init poses.")
     group.add_argument("--guidance_param", default=2.5, type=float,
                        help="For classifier-free sampling - specifies the s parameter, as defined in the paper.")
+    group.add_argument("--num_eval_samples", default=None, type=int,
+                       help="Maximal number of samples to evaluate for debugging. If None, evaluates all.")
 
 
 def get_cond_mode(args):
@@ -284,6 +308,28 @@ def train_args():
     add_model_options(parser)
     add_diffusion_options(parser)
     add_training_options(parser)
+
+    # Allow inheritance from pretrained_checkpoint
+    args_temp, _ = parser.parse_known_args()
+    if args_temp.pretrained_checkpoint != "" and os.path.exists(args_temp.pretrained_checkpoint):
+        args_path = os.path.join(os.path.dirname(args_temp.pretrained_checkpoint), 'args.json')
+        if os.path.exists(args_path):
+            print(f"Loading arguments from {args_path} for inheritance...")
+            with open(args_path, 'r') as fr:
+                model_args = json.load(fr)
+            
+            # Decide which groups to inherit
+            # We typically want to inherit model structure, diffusion params, and dataset config
+            # We usually DO NOT want to inherit training params (like save_dir, overwrite, etc.)
+            groups_to_inherit = ['dataset', 'model', 'diffusion']
+            keys_to_inherit = []
+            for group_name in groups_to_inherit:
+                keys_to_inherit += get_args_per_group_name(parser, args_temp, group_name)
+            
+            # Filter and set defaults
+            defaults_to_update = {k: v for k, v in model_args.items() if k in keys_to_inherit}
+            parser.set_defaults(**defaults_to_update)
+
     return apply_rules(parser.parse_args())
 
 

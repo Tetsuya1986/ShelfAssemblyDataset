@@ -70,7 +70,7 @@ def get_opt(opt_path, device):
         opt.max_motion_length = 196
     elif opt.dataset_name == 'shelf_assembly':
         opt.data_root = '/data/utsubo0/users/narita/shelf_assembly/shelf_assembly_dataset'
-        opt.motion_dir = pjoin(opt.data_root, 'smpl-x_py37')
+        opt.motion_dir = pjoin(opt.data_root, 'smpl-x')
         opt.text_dir = pjoin(opt.data_root, 'annotation')
         opt.headcam_dir = pjoin(opt.data_root, 'headcam')
         opt.joints_num = 51

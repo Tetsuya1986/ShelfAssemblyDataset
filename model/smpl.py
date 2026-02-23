@@ -4,7 +4,7 @@ import torch
 
 import contextlib
 
-from smplx import SMPLLayer as _SMPLLayer
+from smplx import create as smplx_create
 from smplx.lbs import vertices2joints
 
 
@@ -61,37 +61,92 @@ JOINT_NAMES = [
 
 
 # adapted from VIBE/SPIN to output smpl_joints, vibe joints and action2motion joints
-class SMPL(_SMPLLayer):
+class SMPL(torch.nn.Module):
     """ Extension of the official SMPL implementation to support more joints """
 
-    def __init__(self, model_path=SMPL_MODEL_PATH, **kwargs):
-        kwargs["model_path"] = model_path
-
+    def __init__(self, model_path=SMPL_MODEL_PATH, model_type='smpl', **kwargs):
+        super(SMPL, self).__init__()
         # remove the verbosity for the 10-shapes beta parameters
         with contextlib.redirect_stdout(None):
-            super(SMPL, self).__init__(**kwargs)
+            self.model = smplx_create(model_path=model_path, model_type=model_type, **kwargs)
+            
+        self.num_betas = self.model.num_betas if hasattr(self.model, 'num_betas') else 10
             
         J_regressor_extra = np.load(JOINT_REGRESSOR_TRAIN_EXTRA)
         self.register_buffer('J_regressor_extra', torch.tensor(J_regressor_extra, dtype=torch.float32))
         vibe_indexes = np.array([JOINT_MAP[i] for i in JOINT_NAMES])
         a2m_indexes = vibe_indexes[action2motion_joints]
-        smpl_indexes = np.arange(24)
-        a2mpl_indexes = np.unique(np.r_[smpl_indexes, a2m_indexes])
+        
+        # Determine number of joints in standard output
+        # For SMPL-X, we want more than 24.
+        num_joints = self.model.NUM_BODY_JOINTS + 1 + 30 + 3 + 20 # usually 127 for SMPL-X
+        # Actually, let's just use all joints available if it's more than 24.
+        # But for map initialization, we need a fixed number or a way to handle it.
+        # Standard SMPL has 24 joints.
+        smpl_indexes = np.arange(127) if model_type == 'smplx' else np.arange(24)
+        
+        a2mpl_indexes = np.unique(np.r_[np.arange(24), a2m_indexes])
 
         self.maps = {"vibe": vibe_indexes,
                      "a2m": a2m_indexes,
                      "smpl": smpl_indexes,
                      "a2mpl": a2mpl_indexes}
+
         
     def forward(self, *args, **kwargs):
-        smpl_output = super(SMPL, self).forward(*args, **kwargs)
+        # Check for batch size > 1 and handle it if model is initialized for size 1
+        batch_size = 1
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor) and v.ndim > 0:
+                batch_size = max(batch_size, v.shape[0])
         
-        extra_joints = vertices2joints(self.J_regressor_extra, smpl_output.vertices)
-        all_joints = torch.cat([smpl_output.joints, extra_joints], dim=1)
+        if batch_size > 1:
+            # Slower path but handles broadcasting mismatch in smplx library
+            all_outputs = []
+            for i in range(batch_size):
+                single_kwargs = {}
+                for k, v in kwargs.items():
+                    if isinstance(v, torch.Tensor) and v.shape[0] == batch_size:
+                        single_kwargs[k] = v[i:i+1]
+                    else:
+                        single_kwargs[k] = v
+                
+                single_output = self.model(*args, **single_kwargs)
+                all_outputs.append(single_output)
+            
+            # Aggregate outputs
+            smpl_output = {}
+            for key in all_outputs[0].keys():
+                vals = [out[key] for out in all_outputs if out[key] is not None]
+                if vals:
+                    smpl_output[key] = torch.cat(vals, dim=0)
+                else:
+                    smpl_output[key] = None
+        else:
+            smpl_output = self.model(*args, **kwargs)
+        
+        # Normalize access (smpl_output could be a dict or a ModelOutput object)
+        if isinstance(smpl_output, dict):
+            vertices = smpl_output['vertices']
+            joints = smpl_output['joints']
+        else:
+            vertices = smpl_output.vertices
+            joints = smpl_output.joints
 
-        output = {"vertices": smpl_output.vertices}
+        if vertices.shape[1] == self.J_regressor_extra.shape[1]:
+            extra_joints = vertices2joints(self.J_regressor_extra, vertices)
+            all_joints = torch.cat([joints, extra_joints], dim=1)
+        else:
+            # For SMPL-X or other models where vertex count doesn't match the SMPL regressor
+            all_joints = joints
+
+        output = {"vertices": vertices}
 
         for joinstype, indexes in self.maps.items():
-            output[joinstype] = all_joints[:, indexes]
+            # For SMPL-X, smpl_output.joints might have different ordering or more joints.
+            # However, for basic vibe/a2m evaluation, we often rely on vertices2joints extra regressor.
+            # We keep it as is and see.
+            if indexes.max() < all_joints.shape[1]:
+                output[joinstype] = all_joints[:, indexes]
             
         return output

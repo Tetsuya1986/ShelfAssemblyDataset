@@ -138,3 +138,7 @@ slurm**/
 *.err
 *.slurm
 .vscode/
+
+save
+HumanML3D
+t2m_test.npy
