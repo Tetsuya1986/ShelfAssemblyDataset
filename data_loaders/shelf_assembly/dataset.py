@@ -41,8 +41,8 @@ class ShelfAssemblyDataset(data.Dataset):
         print(f"Loading dataset {self.opt.dataset_name} (split: {self.split}) ...")
         self.motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
         self.annotation = self.load_annotation(self.opt.text_dir, mode, device)
-        self.envcam_img = self.load_envcam_img(self.opt.envcam_dir)
-        self.headcam_img = self.load_headcam_img(self.opt.headcam_dir)
+        self.envcam_img = self.load_envcam_img_npy(self.opt.envcam_dir)
+        self.headcam_img = self.load_headcam_img_npy(self.opt.headcam_dir)
         import pdb; pdb.set_trace()
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
             mode, self.motion_data, self.annotation, self.opt.fps, self.opt.max_motion_length, device)
@@ -148,6 +148,34 @@ class ShelfAssemblyDataset(data.Dataset):
                             data_list.append(copy.deepcopy(dic))
         return data_list
 
+    def load_headcam_img_npy(self, root_directory):
+        all_processed_data = []
+        if not os.path.isdir(root_directory):
+            print(f"Error: Root directory '{root_directory}' not found.")
+            return all_processed_data
+
+        for filename in tqdm(sorted(os.listdir(root_directory)), desc='Loading headcam images'):
+            if filename.lower().endswith('.npy'):
+                image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
+                video_no = filename[:6]
+                if "_Main_" in filename:
+                    main_sub = "Main"
+                elif "_Sub_" in filename:
+                    main_sub = "Sub"
+
+                if main_sub is None:
+                    print(f"Warning: Could not determine 'Main' or 'Sub' from '{filename}'. Skipping.")
+                    continue
+
+                data_entry = {
+                    'no': int(video_no),
+                    'main_sub': main_sub,
+                    'images': image_array
+                }
+                all_processed_data.append(data_entry)
+
+        return all_processed_data
+
     def load_headcam_img(self, root_directory):
         # output list[dic]. dic={'no','main_sub','images'}
 
@@ -193,6 +221,38 @@ class ShelfAssemblyDataset(data.Dataset):
             all_processed_data.append(data_entry)
 
         return all_processed_data
+
+    def load_envcam_img_npy(self, root_directory):
+        # output list[dic]. dic={'no','images0','images1','images2','images3'}
+        all_processed_data = {}
+
+        if not os.path.isdir(root_directory):
+            print(f"Error: Root directory '{root_directory}' not found.")
+            return all_processed_data
+
+        for filename in tqdm(sorted(os.listdir(root_directory)), desc='Loading envcam images'):
+            if filename.lower().endswith('.npy'):
+                image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
+                video_no = filename[:6]
+                match_envcam = re.search(r'envcam(\d)', filename)
+                envcam_no = int(match_envcam.group(1))
+
+                if video_no not in all_processed_data:
+                    all_processed_data[video_no] = {}
+
+                image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
+                all_processed_data[video_no][f'images{envcam_no}'] = image_array
+
+                if 'no' not in all_processed_data[video_no]:
+                    all_processed_data[video_no]['no'] = int(video_no)
+
+        sorted_keys = sorted(all_processed_data.keys(), key=lambda k: int(k))
+
+        all_processed_data_list = []
+        for key in sorted_keys:
+            all_processed_data_list.append(all_processed_data[key])
+
+        return all_processed_data_list
 
     def load_envcam_img(self, root_directory):
         # output list[dic]. dic={'no','images0','images1','images2','images3'}
