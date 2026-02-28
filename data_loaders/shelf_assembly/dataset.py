@@ -45,19 +45,29 @@ class ShelfAssemblyDataset(data.Dataset):
         motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
         annotation = self.load_annotation(self.opt.text_dir, mode, device)
 
-        envcam_img = [0] * len(motion_data)
-        headcam_img = [0] * len(motion_data)
-        if self.use_envcam:
-            envcam_img = self.load_envcam_img_npy(self.opt.envcam_dir)
-            # duplicate the data for Sub person
-            envcam_img = [x for x in envcam_img for _ in range(2)]
+        # Lazy loading setup (using pre-encoded CLIP features)
+        self.headcam_source = {}
         if self.use_headcam:
-            headcam_img = self.load_headcam_img_npy(self.opt.headcam_dir)
+            self.headcam_source = self.get_cam_source_mapping(self.opt.headcam_clip_dir)
+            if not self.headcam_source:
+                print(f"Warning: No headcam CLIP features found in {self.opt.headcam_clip_dir}")
+
+        self.envcam_source = {}
+        if self.use_envcam:
+            self.envcam_source = self.get_cam_source_mapping(self.opt.envcam_clip_dir)
+            if not self.envcam_source:
+                print(f"Warning: No envcam CLIP features found in {self.opt.envcam_clip_dir}")
 
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
-            mode, motion_data, annotation, envcam_img, headcam_img,
+            mode, motion_data, annotation,
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
             self.opt.max_motion_length, device)
+        
+        self.pre_load = kwargs.get('pre_load_features', False)
+        self.feature_cache = {} if self.pre_load else None
+        self.dir_cache = {} # Caches list of files in each camera directory
+        if self.pre_load and (self.use_headcam or self.use_envcam):
+            self.pre_load_features()
 
     def load_split_ids(self, split_file_path):
         split_ids = set()
@@ -159,231 +169,114 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["data"] = data["Sub_data"]
                             data_list.append(copy.deepcopy(dic))
         return data_list
-
-    def load_headcam_img_npy(self, root_directory):
-        all_processed_data = []
+    def get_cam_source_mapping(self, root_directory):
+        mapping = {}
         if not os.path.isdir(root_directory):
             print(f"Error: Root directory '{root_directory}' not found.")
-            return all_processed_data
+            return mapping
 
-        for filename in tqdm(sorted(os.listdir(root_directory)), desc='Loading headcam images'):
-            if filename.lower().endswith('.npy'):
-                image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
-                video_no = filename[:6]
-
-                # Filter by split
-                if int(video_no) not in self.split_ids:
-                    continue
-
-                if "_Main_" in filename:
-                    main_sub = "Main"
-                elif "_Sub_" in filename:
-                    main_sub = "Sub"
-
-                if main_sub is None:
-                    print(f"Warning: Could not determine 'Main' or 'Sub' from '{filename}'. Skipping.")
-                    continue
-
-                data_entry = {
-                    'no': int(video_no),
-                    'main_sub': main_sub,
-                    'images': image_array
-                }
-                all_processed_data.append(data_entry)
-
-        return all_processed_data
-
-    def load_headcam_img(self, root_directory):
-        # output list[dic]. dic={'no','main_sub','images'}
-
-        all_processed_data = []
-
-        if not os.path.isdir(root_directory):
-            print(f"Error: Root directory '{root_directory}' not found.")
-            return all_processed_data
-
-        # Get all direct subdirectories
-        subdirs = [d for d in sorted(os.listdir(root_directory)) if os.path.isdir(os.path.join(root_directory, d))]
-
-        if not subdirs:
-            print(f"No subdirectories found in '{root_directory}'.")
-            return all_processed_data
-
-        print(f"Found {len(subdirs)} subdirectories to process.")
-
-        for subdir_name in tqdm(subdirs, desc="Loading headcam images"):
-            full_subdir_path = os.path.join(root_directory, subdir_name)
-
-            # Assumes the first 6 characters are always the number
-            video_no = subdir_name[:6]
-
-            # Extract 'main_sub' ('Main' or 'Sub')
-            main_sub = None
-            if "_Main_" in subdir_name:
-                main_sub = "Main"
-            elif "_Sub_" in subdir_name:
-                main_sub = "Sub"
-
-            if main_sub is None:
-                print(f"Warning: Could not determine 'Main' or 'Sub' from '{subdir_name}'. Skipping.")
+        # When using CLIP features, we have subdirectories
+        # When using raw images, we might have .npy files or subdirectories
+        for item in sorted(os.listdir(root_directory)):
+            video_no = item[:6]
+            if not video_no.isdigit() or int(video_no) not in self.split_ids:
                 continue
+            
+            if video_no not in mapping:
+                mapping[video_no] = {}
+            
+            full_path = os.path.join(root_directory, item)
+            
+            if "headcam" in item:
+                main_sub = "Main" if "_Main_" in item else "Sub"
+                mapping[video_no][main_sub] = full_path
+            elif "envcam" in item:
+                match_envcam = re.search(r'envcam(\d)', item)
+                if match_envcam:
+                    envcam_no = int(match_envcam.group(1))
+                    mapping[video_no][f'images{envcam_no}'] = full_path
+        return mapping
 
-            image_array = self._load_imgs_in_dir(full_subdir_path)
+    def load_feature(self, path):
+        if self.feature_cache is not None and path in self.feature_cache:
+            return self.feature_cache[path]
+        
+        feature = np.load(path)
+        if self.feature_cache is not None:
+            self.feature_cache[path] = feature
+        return feature
 
-            data_entry = {
-                'no': int(video_no),
-                'main_sub': main_sub,
-                'images': image_array
-            }
-            all_processed_data.append(data_entry)
-
-        return all_processed_data
-
-    def load_envcam_img_npy(self, root_directory):
-        # output list[dic]. dic={'no','images0','images1','images2','images3'}
-        all_processed_data = {}
-
-        if not os.path.isdir(root_directory):
-            print(f"Error: Root directory '{root_directory}' not found.")
-            return all_processed_data
-
-        for filename in tqdm(sorted(os.listdir(root_directory)), desc='Loading envcam images'):
-            if filename.lower().endswith('.npy'):
-                video_no = filename[:6]
-
-                # Filter by split
-                if int(video_no) not in self.split_ids:
-                    continue
-                
-                match_envcam = re.search(r'envcam(\d)', filename)
-                envcam_no = int(match_envcam.group(1))
-
-                if video_no not in all_processed_data:
-                    all_processed_data[video_no] = {}
-
-                image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
-                all_processed_data[video_no][f'images{envcam_no}'] = image_array
-
-                if 'no' not in all_processed_data[video_no]:
-                    all_processed_data[video_no]['no'] = int(video_no)
-
-        sorted_keys = sorted(all_processed_data.keys(), key=lambda k: int(k))
-
-        all_processed_data_list = []
-        for key in sorted_keys:
-            all_processed_data_list.append(all_processed_data[key])
-
-        return all_processed_data_list
-
-    def load_envcam_img(self, root_directory):
-        # output list[dic]. dic={'no','images0','images1','images2','images3'}
-        all_processed_data = {}
-
-        if not os.path.isdir(root_directory):
-            print(f"Error: Root directory '{root_directory}' not found.")
-            return all_processed_data
-
-        # Get all direct subdirectories
-        subdirs = [d for d in sorted(os.listdir(root_directory)) if os.path.isdir(os.path.join(root_directory, d))]
-
-        if not subdirs:
-            print(f"No subdirectories found in '{root_directory}'.")
-            return all_processed_data
-
-        print(f"Found {len(subdirs)} subdirectories to process.")
-
-        for subdir_name in tqdm(subdirs, desc="Loading envcam images"):
-            full_subdir_path = os.path.join(root_directory, subdir_name)
-            # Assumes the first 6 characters are always the number
-            video_no = subdir_name[:6]
-            match_envcam = re.search(r'envcam(\d)', subdir_name)
-            envcam_no = int(match_envcam.group(1))
-
-            if video_no not in all_processed_data:
-                all_processed_data[video_no] = {}
-
-            image_array = self._load_imgs_in_dir(full_subdir_path)
-            all_processed_data[video_no][f'images{envcam_no}'] = image_array
-
-            if 'no' not in all_processed_data[video_no]:
-                all_processed_data[video_no]['no'] = int(video_no)
-
-        sorted_keys = sorted(all_processed_data.keys(), key=lambda k: int(k))
-
-        all_processed_data_list = []
-        for key in sorted_keys:
-            all_processed_data_list.append(all_processed_data[key])
-
-        return all_processed_data_list
-
-    def _load_imgs_in_dir(self, dir_path):
-        image_files = []
-        for filename in sorted(os.listdir(dir_path)):
-            if filename.lower().startswith('frame_') and filename.lower().endswith('.jpg'):
-                # Extract frame number for sorting
-                # Assuming format 'frame_XXXXXX.jpg'
-                match = re.match(r'frame_(\d{6})\.jpg', filename, re.IGNORECASE)
-                if match:
-                    frame_number = int(match.group(1))
-                    image_files.append((frame_number, os.path.join(dir_path, filename)))
-
-        # Sort image files by their frame number
-        image_files.sort(key=lambda x: x[0])
-
-        # 4. Load images and concatenate
-        concatenated_images = []
-        if not image_files:
-            # print(f"Warning: No image files found in '{full_subdir_path}'. 'image' will be an empty array.")
-            # If no images, we'll just add an empty numpy array for 'image'
-            image_array = np.empty((0, 0, 0, 3), dtype=np.uint8) # Default empty shape for consistency
+    def resolve_frame_path(self, dir_path, idx):
+        """Resolves the exact frame path, handling the fallback to first/last if missing."""
+        f_path = os.path.join(dir_path, f"frame_{idx:06d}.npy")
+        if os.path.exists(f_path):
+            return f_path
+        
+        # Fallback to first/last if the index is out of bounds
+        if dir_path not in self.dir_cache:
+            all_frames = sorted(glob.glob(os.path.join(dir_path, "frame_*.npy")))
+            self.dir_cache[dir_path] = all_frames
         else:
-            # Load images
-            for _, img_path in image_files:
-                img = cv2.imread(img_path)
-                if img is None:
-                    print(f"Warning: Could not load image '{img_path}'. Skipping.")
-                    continue
-                concatenated_images.append(img)
+            all_frames = self.dir_cache[dir_path]
+            
+        if not all_frames:
+            return None
+            
+        return all_frames[0] if idx == 0 else all_frames[-1]
 
-            if concatenated_images:
-                image_array = np.stack(concatenated_images, axis=0) # Concatenate along a new 0th (time) dimension
-            else:
-                image_array = np.empty((0, 0, 0, 3), dtype=np.uint8) # Fallback if all images failed to load
+    def pre_load_features(self):
+        print("Pre-loading CLIP features into cache...")
+        paths_to_load = set()
+        
+        # 1. Collect all required paths
+        for motion in tqdm(self.motion_clip):
+            if self.use_headcam and 'headcam_info' in motion:
+                info = motion['headcam_info']
+                vid = info['video_no']
+                ms = info['main_sub']
+                if vid in self.headcam_source and ms in self.headcam_source[vid]:
+                    path = self.headcam_source[vid][ms]
+                    idx_s, idx_e = info['indices']
+                    p1 = self.resolve_frame_path(path, idx_s)
+                    p2 = self.resolve_frame_path(path, idx_e)
+                    if p1: paths_to_load.add(p1)
+                    if p2: paths_to_load.add(p2)
+            
+            if self.use_envcam and 'envcam_info' in motion:
+                info = motion['envcam_info']
+                vid = info['video_no']
+                idx_s, idx_e = info['indices']
+                for i in range(4):
+                    if vid in self.envcam_source and f'images{i}' in self.envcam_source[vid]:
+                        path = self.envcam_source[vid][f'images{i}']
+                        p1 = self.resolve_frame_path(path, idx_s)
+                        p2 = self.resolve_frame_path(path, idx_e)
+                        if p1: paths_to_load.add(p1)
+                        if p2: paths_to_load.add(p2)
+        
+        # 2. Bulk load features
+        for path in tqdm(list(paths_to_load), desc="Loading features"):
+            self.load_feature(path)
+        
+        print(f"Pre-loaded {len(self.feature_cache)} features into memory.")
 
-        return image_array
+    # Legacy image loading methods removed (no longer used)
 
 
-    def extract_motion_clip(self, mode, motion, annotation, envcam, headcam,
+    def extract_motion_clip(self, mode, motion, annotation,
                             fps, envcam_fps, headcam_fps, max_len, device):
         assert len(annotation) == len(motion), (
             f"motion length:{len(motion)} is not the same to annotation length:{len(annotation)}"
-        )
-        if self.use_envcam:
-            assert len(annotation) == len(envcam), (
-            f"envcam data length:{len(envcam)} is not the same to annotation length:{len(annotation)}"
-        )
-        if self.use_headcam:
-            assert len(annotation) == len(headcam), (
-            f"headcam data length:{len(headcam)} is not the same to annotation length:{len(annotation)}"
         )
 
         motion_list = []
         annotation_list = []
 
-        if self.task == 'prediction':
-            window_size_frames = int((self.input_seconds + self.prediction_seconds) * fps)
-            stride_frames = int(self.stride * fps)
-
-        for ann, mo, env, head in tzip(annotation, motion, envcam, headcam):
+        for ann, mo in tzip(annotation, motion):
             assert ann["no"] == mo["no"]
             assert ann["main_sub"] == mo["main_sub"]
 
-            if self.use_envcam:
-                assert ann["no"] == env["no"]
-
-            if self.use_headcam:
-                assert ann["no"] == head["no"]
-                assert ann["main_sub"] == head["main_sub"]
+            video_no_str = f"{ann['no']:06d}"
 
             for act in ann["data"]:
                 start_str = act["s_time"]
@@ -412,6 +305,10 @@ class ShelfAssemblyDataset(data.Dataset):
                 # Logic for prediction mode
                 if self.task == 'prediction':
                     input_size_frames = int(self.input_seconds * fps)
+                    prediction_size_frames = int(self.prediction_seconds * fps)
+                    window_size_frames = input_size_frames + prediction_size_frames
+                    stride_frames = int(self.stride * fps)
+                    
                     action_len = e_frame - s_frame + 1
 
                     if action_len <= input_size_frames:
@@ -448,24 +345,22 @@ class ShelfAssemblyDataset(data.Dataset):
                             mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
                             mdic["root_pos"] = pad_tensor(root_pos)
 
-                            # Extract envcam image data
+                            # Extract envcam image metadata
                             if self.use_envcam:
-                                ec_start = min(int(current_start/fps*envcam_fps), len(env)-2)
-                                ec_end   = min(int((real_end+1)/fps*envcam_fps), len(env)-1)
-                                indices = [ec_start, ec_end]
-                                for i in range(4):  # Assuming keys follows the pattern 'images0', 'images1', ...
-                                    key = f"images{i}"
-                                    if key in env:
-                                        images = np.stack([env[key][k] for k in indices], axis=0)
-                                        mdic[f"envcam{i}"] = torch.from_numpy(images)
+                                mdic["envcam_info"] = {
+                                    'video_no': video_no_str,
+                                    'indices': [min(int(current_start/fps*envcam_fps), 1000000), 
+                                                min(int((real_end+1)/fps*envcam_fps), 1000000)] # placeholder, will cap at real len in getitem
+                                }
 
-                            # Extract headcam image data
+                            # Extract headcam image metadata
                             if self.use_headcam:
-                                he_start = min(int(current_start/fps*headcam_fps), len(head)-2)
-                                he_end   = min(int((real_end+1)/fps*headcam_fps), len(head)-1)
-                                indices = [he_start, he_end]
-                                images = np.stack([head["images"][k] for k in indices], axis=0)
-                                mdic["headcam"] = torch.from_numpy(images)
+                                mdic["headcam_info"] = {
+                                    'video_no': video_no_str,
+                                    'main_sub': ann["main_sub"],
+                                    'indices': [min(int(current_start/fps*headcam_fps), 1000000), 
+                                                min(int((real_end+1)/fps*headcam_fps), 1000000)]
+                                }
 
                             motion_list.append(mdic)
 
@@ -499,21 +394,17 @@ class ShelfAssemblyDataset(data.Dataset):
                 mdic["root_pos"] = mo["root_pos"][s_frame : e_frame + 1]  # .to(device)
 
                 if self.use_envcam:
-                    ec_start = min(int(current_start/fps*envcam_fps), len(envcam)-2)
-                    ec_end   = min(int((real_end+1)/fps*envcam_fps), len(envcam)-1)
-                    indices = [ec_start, ec_end]
-                    for i in range(4):  # Assuming keys follows the pattern 'images0', 'images1', ...
-                        key = f"images{i}"
-                        if key in env:
-                            images = np.stack([env[key][k] for k in indices], axis=0)
-                            mdic[f"envcam{i}"] = torch.from_numpy(images)
+                    mdic["envcam_info"] = {
+                        'video_no': video_no_str,
+                        'indices': [int(s_frame/fps*envcam_fps), int(e_frame/fps*envcam_fps)]
+                    }
 
                 if self.use_headcam:
-                    ec_start = min(int(current_start/fps*headcam_fps), len(headcam)-2)
-                    ec_end   = min(int((real_end+1)/fps*headcam_fps), len(headcam)-1)
-                    indices = [ec_start, ec_end]
-                    images = np.stack([head["images"][k] for k in indices], axis=0)
-                    mdic["headcam"] = torch.from_numpy(images)
+                    mdic["headcam_info"] = {
+                        'video_no': video_no_str,
+                        'main_sub': ann["main_sub"],
+                        'indices': [int(s_frame/fps*headcam_fps), int(e_frame/fps*headcam_fps)]
+                    }
 
                 motion_list.append(mdic)
 
@@ -527,6 +418,46 @@ class ShelfAssemblyDataset(data.Dataset):
         return len(self.annotation_clip)
 
     def __getitem__(self, idx):
-        motion = self.motion_clip[idx]
+        motion = copy.deepcopy(self.motion_clip[idx])
         text = self.annotation_clip[idx]
+
+        # On-demand loading of CLIP features
+        if self.use_headcam and 'headcam_info' in motion:
+            info = motion['headcam_info']
+            vid = info['video_no']
+            ms = info['main_sub']
+            
+            # Default to zero features if missing
+            motion['headcam'] = torch.zeros((2, 512))
+            
+            if vid in self.headcam_source and ms in self.headcam_source[vid]:
+                path = self.headcam_source[vid][ms]
+                idx_s, idx_e = info['indices']
+                
+                f1 = self.resolve_frame_path(path, idx_s)
+                f2 = self.resolve_frame_path(path, idx_e)
+                
+                if f1 and f2:
+                    motion['headcam'] = torch.from_numpy(np.stack([self.load_feature(f1), self.load_feature(f2)], axis=0))
+            del motion['headcam_info']
+
+        if self.use_envcam and 'envcam_info' in motion:
+            info = motion['envcam_info']
+            vid = info['video_no']
+            
+            for i in range(4):
+                # Default to zero features
+                motion[f'envcam{i}'] = torch.zeros((2, 512))
+                
+                if vid in self.envcam_source and f'images{i}' in self.envcam_source[vid]:
+                    path = self.envcam_source[vid][f'images{i}']
+                    idx_s, idx_e = info['indices']
+                    
+                    f1 = self.resolve_frame_path(path, idx_s)
+                    f2 = self.resolve_frame_path(path, idx_e)
+                    
+                    if f1 and f2:
+                        motion[f'envcam{i}'] = torch.from_numpy(np.stack([self.load_feature(f1), self.load_feature(f2)], axis=0))
+            del motion['envcam_info']
+
         return motion, text

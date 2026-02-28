@@ -62,6 +62,17 @@ def collate(batch):
     if 'key' in notnone_batches[0]:
         cond['y'].update({'db_key': [b['key'] for b in notnone_batches]})
 
+    # Handle CLIP Camera features for Shelf Assembly
+    if 'headcam' in notnone_batches[0]:
+        headcam_batch = torch.stack([b['headcam'] for b in notnone_batches])
+        cond['y'].update({'headcam': headcam_batch})
+    
+    for i in range(4):
+        key = f'envcam{i}'
+        if key in notnone_batches[0]:
+            envcam_batch = torch.stack([b[key] for b in notnone_batches])
+            cond['y'].update({key: envcam_batch})
+
     return motion, cond
 
 # an adapter to our collate func
@@ -110,6 +121,15 @@ def shelf_assembly_collate(batch):
         }
         if 'valid_length' in b[1]:
             d['lengths'] = b[1]['valid_length']
+        
+        # Pass through CLIP features if available
+        if 'headcam' in b[0]:
+            d['headcam'] = b[0]['headcam']
+        for i in range(4):
+            key = f'envcam{i}'
+            if key in b[0]:
+                d[key] = b[0][key]
+
         adapted_batch.append(d)
 
     # Change order

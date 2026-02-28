@@ -163,6 +163,8 @@ def add_data_options(parser):
                        help="Use head camera information")
     group.add_argument("--use_envcam", action='store_true',
                        help="Use environment camera information")
+    group.add_argument("--pre_load_features", action='store_true',
+                       help="Pre-load CLIP features into memory during initialization.")
 
 def add_training_options(parser):
     group = parser.add_argument_group('training')
