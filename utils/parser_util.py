@@ -89,6 +89,8 @@ def add_base_options(parser):
     group.add_argument("--train_platform_type", default='NoPlatform', choices=['NoPlatform', 'ClearmlPlatform', 'TensorboardPlatform', 'WandBPlatform'], type=str,
                        help="Choose platform to log results. NoPlatform means no logging.")
     group.add_argument("--external_mode", default=False, type=bool, help="For backward cometability, do not change or delete.")
+    group.add_argument("--hml_mode", default='action', type=str,
+                       choices=['action', 'action_task'], help="Action label mode.")
 
 
 def add_diffusion_options(parser):

@@ -76,7 +76,7 @@ class ShelfAssemblyDataset(data.Dataset):
         
         for filepath in tqdm(files, desc="Loading motion data"):
             filename = os.path.basename(filepath)
-            if mode == "action":
+            if mode in ["action", "action_task"]:
                 # Check filename pattern if necessary (e.g. HH check)
                 if len(filename) >= 19 and filename[17:19] == "HH":
                     no = int(filename[:6])
@@ -133,7 +133,7 @@ class ShelfAssemblyDataset(data.Dataset):
         for root, _, files in os.walk(text_dir):
             sorted_files = sorted(files)
             for filename in tqdm(sorted_files, desc="Loading annnotation data"):
-                if mode == "action":
+                if mode in ["action", "action_task"]:
                     if (
                         filename.lower().endswith("_action.json")
                         and len(filename) >= 19
@@ -158,6 +158,29 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["main_sub"] = "Sub"
                             dic["data"] = data["Sub_data"]
                             data_list.append(copy.deepcopy(dic))
+
+        if mode == "action_task":
+            for root, _, files in os.walk(text_dir):
+                sorted_files = sorted(files)
+                for filename in tqdm(sorted_files, desc="Loading annnotation data"):
+                    if (
+                        filename.lower().endswith("_task_specific.json")
+                        and len(filename) >= 19
+                        and filename[17:19] == "HH"
+                    ):
+                        no = int(filename[:6])
+
+                        # Filter by split
+                        if no not in self.split_ids:
+                            continue
+
+                        filepath = os.path.join(root, filename)
+                        with open(filepath, "r") as f:
+                            data = json.load(f)
+                            results = [item for item in data_list if item.get("no") == data["no"]]
+                            for res in results:
+                                res['data_task'] = data['data']
+
         return data_list
 
     def load_headcam_img_npy(self, root_directory):
@@ -408,6 +431,18 @@ class ShelfAssemblyDataset(data.Dataset):
                     "no": mo["no"],
                     "main_sub": mo["main_sub"]
                 }
+
+                if mode == 'action_task':
+                    for task in ann["data_task"]:
+                        start_str = task["s_time"]
+                        hours, minutes, seconds = start_str.split(":")
+                        start_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                        end_str = act["e_time"]
+                        hours, minutes, seconds = end_str.split(":")
+                        end_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                        if start_sec_task <= start_sec and start_sec < end_sec_task:
+                            base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
+                            break
 
                 # Logic for prediction mode
                 if self.task == 'prediction':

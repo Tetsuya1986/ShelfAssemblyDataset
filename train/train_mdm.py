@@ -66,7 +66,7 @@ def main():
                               fixed_len=args.pred_len + args.context_len, 
                               pred_len=args.pred_len,
                               device=dist_util.dev(),
-                              hml_mode='action',
+                              hml_mode=args.hml_mode, # 'action' 'action_task'
                               task=args.task,
                               input_seconds=args.input_seconds,
                               prediction_seconds=args.prediction_seconds,
