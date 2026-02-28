@@ -159,10 +159,10 @@ def add_data_options(parser):
                        help="Prediction window size in seconds (for prediction mode).")
     group.add_argument("--stride", default=0.5, type=float,
                        help="Stride in seconds for sliding window (for prediction mode).")
-    group.add_argument("--head_cam_fps", default=5.0, type=float,
-                       help="FPS to capture images of head cam data.")
-    group.add_argument("--env_cam_fps", default=5.0, type=float,
-                       help="FPS to capture images of env cam data.")
+    group.add_argument("--use_headcam", action='store_true',
+                       help="Use head camera information")
+    group.add_argument("--use_envcam", action='store_true',
+                       help="Use environment camera information")
 
 def add_training_options(parser):
     group = parser.add_argument_group('training')

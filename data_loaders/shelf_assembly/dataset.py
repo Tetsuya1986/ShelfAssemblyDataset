@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils import data
 from tqdm import tqdm
+from tqdm.contrib import tzip
 
 from data_loaders.humanml.utils.get_opt import get_opt
 from utils.rotation_conversions import axis_angle_to_matrix, matrix_to_rotation_6d
@@ -37,15 +38,26 @@ class ShelfAssemblyDataset(data.Dataset):
             self.prediction_seconds = kwargs["prediction_seconds"]
             self.stride = kwargs["stride"]
 
+        self.use_envcam  = kwargs.get('use_envcam')
+        self.use_headcam = kwargs.get('use_headcam')
 
         print(f"Loading dataset {self.opt.dataset_name} (split: {self.split}) ...")
-        self.motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
-        self.annotation = self.load_annotation(self.opt.text_dir, mode, device)
-        self.envcam_img = self.load_envcam_img_npy(self.opt.envcam_dir)
-        self.headcam_img = self.load_headcam_img_npy(self.opt.headcam_dir)
-        import pdb; pdb.set_trace()
+        motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
+        annotation = self.load_annotation(self.opt.text_dir, mode, device)
+
+        envcam_img = [0] * len(motion_data)
+        headcam_img = [0] * len(motion_data)
+        if self.use_envcam:
+            envcam_img = self.load_envcam_img_npy(self.opt.envcam_dir)
+            # duplicate the data for Sub person
+            envcam_img = [x for x in envcam_img for _ in range(2)]
+        if self.use_headcam:
+            headcam_img = self.load_headcam_img_npy(self.opt.headcam_dir)
+
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
-            mode, self.motion_data, self.annotation, self.opt.fps, self.opt.max_motion_length, device)
+            mode, motion_data, annotation, envcam_img, headcam_img,
+            self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
+            self.opt.max_motion_length, device)
 
     def load_split_ids(self, split_file_path):
         split_ids = set()
@@ -120,7 +132,7 @@ class ShelfAssemblyDataset(data.Dataset):
         data_list = []
         for root, _, files in os.walk(text_dir):
             sorted_files = sorted(files)
-            for filename in sorted_files:
+            for filename in tqdm(sorted_files, desc="Loading annnotation data"):
                 if mode == "action":
                     if (
                         filename.lower().endswith("_action.json")
@@ -158,6 +170,11 @@ class ShelfAssemblyDataset(data.Dataset):
             if filename.lower().endswith('.npy'):
                 image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
                 video_no = filename[:6]
+
+                # Filter by split
+                if int(video_no) not in self.split_ids:
+                    continue
+
                 if "_Main_" in filename:
                     main_sub = "Main"
                 elif "_Sub_" in filename:
@@ -232,8 +249,12 @@ class ShelfAssemblyDataset(data.Dataset):
 
         for filename in tqdm(sorted(os.listdir(root_directory)), desc='Loading envcam images'):
             if filename.lower().endswith('.npy'):
-                image_array = np.load(os.path.join(root_directory, filename), mmap_mode='r')
                 video_no = filename[:6]
+
+                # Filter by split
+                if int(video_no) not in self.split_ids:
+                    continue
+                
                 match_envcam = re.search(r'envcam(\d)', filename)
                 envcam_no = int(match_envcam.group(1))
 
@@ -332,9 +353,18 @@ class ShelfAssemblyDataset(data.Dataset):
         return image_array
 
 
-    def extract_motion_clip(self, mode, motion, annotation, fps, max_len, device):
+    def extract_motion_clip(self, mode, motion, annotation, envcam, headcam,
+                            fps, envcam_fps, headcam_fps, max_len, device):
         assert len(annotation) == len(motion), (
             f"motion length:{len(motion)} is not the same to annotation length:{len(annotation)}"
+        )
+        if self.use_envcam:
+            assert len(annotation) == len(envcam), (
+            f"envcam data length:{len(envcam)} is not the same to annotation length:{len(annotation)}"
+        )
+        if self.use_headcam:
+            assert len(annotation) == len(headcam), (
+            f"headcam data length:{len(headcam)} is not the same to annotation length:{len(annotation)}"
         )
 
         motion_list = []
@@ -344,9 +374,16 @@ class ShelfAssemblyDataset(data.Dataset):
             window_size_frames = int((self.input_seconds + self.prediction_seconds) * fps)
             stride_frames = int(self.stride * fps)
 
-        for ann, mo in tqdm(zip(annotation, motion), desc="extract"):
+        for ann, mo, env, head in tzip(annotation, motion, envcam, headcam):
             assert ann["no"] == mo["no"]
             assert ann["main_sub"] == mo["main_sub"]
+
+            if self.use_envcam:
+                assert ann["no"] == env["no"]
+
+            if self.use_headcam:
+                assert ann["no"] == head["no"]
+                assert ann["main_sub"] == head["main_sub"]
 
             for act in ann["data"]:
                 start_str = act["s_time"]
@@ -411,6 +448,25 @@ class ShelfAssemblyDataset(data.Dataset):
                             mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
                             mdic["root_pos"] = pad_tensor(root_pos)
 
+                            # Extract envcam image data
+                            if self.use_envcam:
+                                ec_start = min(int(current_start/fps*envcam_fps), len(env)-2)
+                                ec_end   = min(int((real_end+1)/fps*envcam_fps), len(env)-1)
+                                indices = [ec_start, ec_end]
+                                for i in range(4):  # Assuming keys follows the pattern 'images0', 'images1', ...
+                                    key = f"images{i}"
+                                    if key in env:
+                                        images = np.stack([env[key][k] for k in indices], axis=0)
+                                        mdic[f"envcam{i}"] = torch.from_numpy(images)
+
+                            # Extract headcam image data
+                            if self.use_headcam:
+                                he_start = min(int(current_start/fps*headcam_fps), len(head)-2)
+                                he_end   = min(int((real_end+1)/fps*headcam_fps), len(head)-1)
+                                indices = [he_start, he_end]
+                                images = np.stack([head["images"][k] for k in indices], axis=0)
+                                mdic["headcam"] = torch.from_numpy(images)
+
                             motion_list.append(mdic)
 
                             adic = copy.deepcopy(base_adic)
@@ -441,6 +497,24 @@ class ShelfAssemblyDataset(data.Dataset):
                     s_frame : e_frame + 1
                 ]  # .to(device)
                 mdic["root_pos"] = mo["root_pos"][s_frame : e_frame + 1]  # .to(device)
+
+                if self.use_envcam:
+                    ec_start = min(int(current_start/fps*envcam_fps), len(envcam)-2)
+                    ec_end   = min(int((real_end+1)/fps*envcam_fps), len(envcam)-1)
+                    indices = [ec_start, ec_end]
+                    for i in range(4):  # Assuming keys follows the pattern 'images0', 'images1', ...
+                        key = f"images{i}"
+                        if key in env:
+                            images = np.stack([env[key][k] for k in indices], axis=0)
+                            mdic[f"envcam{i}"] = torch.from_numpy(images)
+
+                if self.use_headcam:
+                    ec_start = min(int(current_start/fps*headcam_fps), len(headcam)-2)
+                    ec_end   = min(int((real_end+1)/fps*headcam_fps), len(headcam)-1)
+                    indices = [ec_start, ec_end]
+                    images = np.stack([head["images"][k] for k in indices], axis=0)
+                    mdic["headcam"] = torch.from_numpy(images)
+
                 motion_list.append(mdic)
 
                 adic = copy.deepcopy(base_adic)

@@ -78,6 +78,8 @@ def get_opt(opt_path, device):
         opt.dim_pose = 251
         opt.max_motion_length = 300
         opt.fps = 30
+        opt.envcam_fps = 5
+        opt.headcam_fps = 5
     else:
         raise KeyError('Dataset not recognized')
 

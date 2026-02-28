@@ -71,8 +71,8 @@ def main():
                               input_seconds=args.input_seconds,
                               prediction_seconds=args.prediction_seconds,
                               stride=args.stride,
-                              head_cam_fps = args.head_cam_fps,
-                              env_cam_fps = args.env_cam_fps)
+                              use_envcam=args.use_envcam,
+                              use_headcam=args.use_headcam)
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
