@@ -139,6 +139,15 @@ class MDM(nn.Module):
                 self.embed_action = EmbedAction(self.num_actions, self.latent_dim)
                 print('EMBED ACTION')
 
+        # Camera feature embeddings
+        cam_dim = 512  # Standard CLIP ViT-B/32 feature dimension
+        self.embed_cam = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(cam_dim * 2, self.latent_dim),
+            nn.SiLU(),
+            nn.Linear(self.latent_dim, self.latent_dim)
+        )
+
         self.output_process = OutputProcess(self.data_rep, self.input_feats, self.latent_dim, self.njoints,
                                             self.nfeats)
 
@@ -148,10 +157,13 @@ class MDM(nn.Module):
         return [p for name, p in self.named_parameters() if not name.startswith('clip_model.')]
 
     def load_and_freeze_clip(self, clip_version):
-        clip_model, clip_preprocess = clip.load(clip_version, device='cpu',
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        clip_model, clip_preprocess = clip.load(clip_version, device=device,
                                                 jit=False)  # Must set jit=False for training
-        clip.model.convert_weights(
-            clip_model)  # Actually this line is unnecessary since clip by default already on float16
+        
+        # Only convert to float16 if on GPU and not explicitly requested otherwise
+        if device == "cpu":
+            clip_model.float()
 
         # Freeze CLIP weights
         clip_model.eval()
@@ -234,6 +246,29 @@ class MDM(nn.Module):
         if 'action' in self.cond_mode:
             action_emb = self.embed_action(y['action'])
             emb = time_emb + self.mask_cond(action_emb, force_mask=force_mask)
+        
+        # Camera conditioning
+        if 'headcam' in y:
+            head_emb = self.embed_cam(y['headcam'].float())
+            head_token = self.mask_cond(head_emb.unsqueeze(0), force_mask=force_mask)
+            emb = torch.cat([emb, head_token], dim=0)
+            if 'text_mask' in locals():
+                text_mask = torch.cat([text_mask, torch.zeros((bs, 1), dtype=torch.bool, device=text_mask.device)], dim=1)
+        
+        env_embs = []
+        for i in range(4):
+            key = f'envcam{i}'
+            if key in y:
+                env_embs.append(self.embed_cam(y[key].float()))
+        
+        if env_embs:
+            # Average environment camera features if multiple are present
+            avg_env_emb = torch.stack(env_embs).mean(dim=0)
+            env_token = self.mask_cond(avg_env_emb.unsqueeze(0), force_mask=force_mask)
+            emb = torch.cat([emb, env_token], dim=0)
+            if 'text_mask' in locals():
+                text_mask = torch.cat([text_mask, torch.zeros((bs, 1), dtype=torch.bool, device=text_mask.device)], dim=1)
+
         if self.cond_mode == 'no_cond': 
             # unconstrained
             emb = time_emb
@@ -278,10 +313,12 @@ class MDM(nn.Module):
         if self.mask_frames and is_valid_mask:
             frames_mask = torch.logical_not(y['mask'][..., :x.shape[0]].squeeze(1).squeeze(1)).to(device=x.device)
             if self.emb_trans_dec or self.arch == 'trans_enc':
+                raise ValueError("Currently not supported")
                 step_mask = torch.zeros((bs, 1), dtype=torch.bool, device=x.device)
                 frames_mask = torch.cat([step_mask, frames_mask], dim=1)
 
         if self.arch == 'trans_enc':
+            raise ValueError("Currently not supported")
             # adding the timestep embed
             xseq = torch.cat((emb, x), axis=0)  # [seqlen+1, bs, d]
             xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, d]
