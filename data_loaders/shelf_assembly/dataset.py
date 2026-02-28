@@ -76,7 +76,7 @@ class ShelfAssemblyDataset(data.Dataset):
         
         for filepath in tqdm(files, desc="Loading motion data"):
             filename = os.path.basename(filepath)
-            if mode in ["action", "action_task"]:
+            if mode in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
                 # Check filename pattern if necessary (e.g. HH check)
                 if len(filename) >= 19 and filename[17:19] == "HH":
                     no = int(filename[:6])
@@ -130,10 +130,10 @@ class ShelfAssemblyDataset(data.Dataset):
     def load_annotation(self, text_dir, mode, device):
         # output list[dic]. dic={'no','main_sub','shelf_id','ass_dis','data'}
         data_list = []
-        for root, _, files in os.walk(text_dir):
-            sorted_files = sorted(files)
-            for filename in tqdm(sorted_files, desc="Loading annnotation data"):
-                if mode in ["action", "action_task"]:
+        if mode in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
+            for root, _, files in os.walk(text_dir):
+                sorted_files = sorted(files)
+                for filename in tqdm(sorted_files, desc="Loading annnotation data"):
                     if (
                         filename.lower().endswith("_action.json")
                         and len(filename) >= 19
@@ -159,7 +159,7 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["data"] = data["Sub_data"]
                             data_list.append(copy.deepcopy(dic))
 
-        if mode == "action_task":
+        if mode in ["action_task", "action_task_taskcommon"]:
             for root, _, files in os.walk(text_dir):
                 sorted_files = sorted(files)
                 for filename in tqdm(sorted_files, desc="Loading annnotation data"):
@@ -180,6 +180,28 @@ class ShelfAssemblyDataset(data.Dataset):
                             results = [item for item in data_list if item.get("no") == data["no"]]
                             for res in results:
                                 res['data_task'] = data['data']
+
+        if mode in ["action_taskcommon", "action_task_taskcommon"]:
+            for root, _, files in os.walk(text_dir):
+                sorted_files = sorted(files)
+                for filename in tqdm(sorted_files, desc="Loading annnotation data"):
+                    if (
+                        filename.lower().endswith("_task_common.json")
+                        and len(filename) >= 19
+                        and filename[17:19] == "HH"
+                    ):
+                        no = int(filename[:6])
+
+                        # Filter by split
+                        if no not in self.split_ids:
+                            continue
+
+                        filepath = os.path.join(root, filename)
+                        with open(filepath, "r") as f:
+                            data = json.load(f)
+                            results = [item for item in data_list if item.get("no") == data["no"]]
+                            for res in results:
+                                res['data_task_common'] = data['data']
 
         return data_list
 
@@ -432,7 +454,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     "main_sub": mo["main_sub"]
                 }
 
-                if mode == 'action_task':
+                if mode in ["action_task", "action_task_taskcommon"]:
                     for task in ann["data_task"]:
                         start_str = task["s_time"]
                         hours, minutes, seconds = start_str.split(":")
@@ -441,7 +463,21 @@ class ShelfAssemblyDataset(data.Dataset):
                         hours, minutes, seconds = end_str.split(":")
                         end_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
                         if start_sec_task <= start_sec and start_sec < end_sec_task:
-                            base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
+                            base_adic["caption"] = f'{base_adic["caption"]} to {task["task"]}'
+                            # base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
+                            break
+
+                if mode in ["action_taskcommon", "action_task_taskcommon"]:
+                    for task in ann["data_task_common"]:
+                        start_str = task["s_time"]
+                        hours, minutes, seconds = start_str.split(":")
+                        start_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                        end_str = act["e_time"]
+                        hours, minutes, seconds = end_str.split(":")
+                        end_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                        if start_sec_task <= start_sec and start_sec < end_sec_task:
+                            base_adic["caption"] = f'{base_adic["caption"]} to {task["task"]}'
+                            # base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
                             break
 
                 # Logic for prediction mode

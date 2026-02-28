@@ -90,7 +90,7 @@ def add_base_options(parser):
                        help="Choose platform to log results. NoPlatform means no logging.")
     group.add_argument("--external_mode", default=False, type=bool, help="For backward cometability, do not change or delete.")
     group.add_argument("--hml_mode", default='action', type=str,
-                       choices=['action', 'action_task'], help="Action label mode.")
+                       choices=['action', 'action_task', 'action_taskcommon', 'action_task_taskcommon'], help="Action label mode.")
 
 
 def add_diffusion_options(parser):
