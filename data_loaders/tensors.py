@@ -141,13 +141,20 @@ def shelf_assembly_collate(batch):
             if 'valid_length' in b[1]:
                 d['lengths'] = b[1]['valid_length']
 
-            # Pass through CLIP features if available
-            if 'headcam' in motion:
-                d['headcam'] = motion['headcam']
+            # Pass through CLIP features if available from sub_motion (target)
+            if 'headcam' in main_motion:
+                d['headcam'] = main_motion['headcam']
+            if 'headcam' in sub_motion:
+                d['headcam'] = sub_motion['headcam']
+
             for i in range(4):
                 key = f'envcam{i}'
-                if key in motion:
-                    d[key] = motion[key]
+                if key in main_motion:
+                    d[key] = main_motion[key]
+            for i in range(4):
+                key = f'envcam{i}'
+                if key in sub_motion:
+                    d[key] = sub_motion[key]
 
             adapted_batch.append(d)
 

@@ -58,16 +58,19 @@ class ShelfAssemblyDataset(data.Dataset):
             if not self.envcam_source:
                 print(f"Warning: No envcam CLIP features found in {self.opt.envcam_clip_dir}")
 
+        self.motion_clip=[]
+        self.annotation_clip=[]
+
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
             mode, motion_data, annotation,
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
             self.opt.max_motion_length, device)
-        
+
         # For joint_motion_prediction task, reorganize data to pair Main and Sub motions
         if self.task == 'joint_motion_prediction':
             self.motion_clip, self.annotation_clip = self._organize_joint_motion_pairs(
                 self.motion_clip, self.annotation_clip)
-        
+
         self.pre_load = kwargs.get('pre_load_features', False)
         self.feature_cache = {} if self.pre_load else None
         self.dir_cache = {} # Caches list of files in each camera directory
@@ -509,7 +512,7 @@ class ShelfAssemblyDataset(data.Dataset):
             no = motion['no']
             main_sub = motion['main_sub']
             # Use clip_start_frame if available (for prediction mode), else use 0
-            clip_key = motion.get('clip_start_frame', 0)
+            clip_key = annotation.get('clip_start_frame', 0)
             pair_key = (no, clip_key)
             
             if main_sub == 'Main':
@@ -557,7 +560,7 @@ class ShelfAssemblyDataset(data.Dataset):
 
     def __getitem__(self, idx):
         motion = copy.deepcopy(self.motion_clip[idx])
-        text = self.annotation_clip[idx]
+        text = copy.deepcopy(self.annotation_clip[idx])
 
         # For joint_motion_prediction, process both main and sub motions
         if self.task == 'joint_motion_prediction' and 'main_motion' in motion:
