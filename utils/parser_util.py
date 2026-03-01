@@ -153,8 +153,8 @@ def add_data_options(parser):
                        help="If empty, will use defaults according to the specified dataset.")
     group.add_argument("--split", default="train", type=str,
                        help="Dataset split to evaluate on (e.g. train, test, val).")
-    group.add_argument("--task", default='generation', choices=['generation', 'prediction'], type=str,
-                       help="Task type: generation or prediction.")
+    group.add_argument("--task", default='generation', choices=['generation', 'prediction', 'joint_motion_prediction'], type=str,
+                       help="Task type: generation, prediction, or joint_motion_prediction (predict partner motion from main motion).")
     group.add_argument("--input_seconds", default=0.5, type=float,
                        help="Input/history window size in seconds (for prediction mode).")
     group.add_argument("--prediction_seconds", default=1.0, type=float,
@@ -301,6 +301,9 @@ def add_evaluation_options(parser):
 def get_cond_mode(args):
     if args.unconstrained:
         cond_mode = 'no_cond'
+    elif getattr(args, 'task', 'generation') == 'joint_motion_prediction':
+        # For joint motion prediction, use both text (action) and motion conditioning
+        cond_mode = 'text_motion'
     elif args.dataset in ['kit', 'humanml', 'shelf_assembly']:
         cond_mode = 'text'
     else:

@@ -73,6 +73,11 @@ def collate(batch):
             envcam_batch = torch.stack([b[key] for b in notnone_batches])
             cond['y'].update({key: envcam_batch})
 
+    # Handle main_motion for joint_motion_prediction
+    if 'main_motion' in notnone_batches[0]:
+        main_motion_batch = collate_tensors([b['main_motion'] for b in notnone_batches])
+        cond['y'].update({'main_motion': main_motion_batch})
+
     return motion, cond
 
 # an adapter to our collate func
@@ -107,36 +112,78 @@ def t2m_prefix_collate(batch, pred_len):
 def shelf_assembly_collate(batch):
     adapted_batch = []
     for b in batch:
-        # global_orient: (T, 6) -> (T, 1, 6)
-        global_orient = b[0]['global_orient'].unsqueeze(1)
-        
-        # root_pos: (T, 3) -> (T, 1, 6) with padding
-        root_pos = b[0]['root_pos']
-        root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
-        root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
-        
-        d = {
-            'inp': torch.cat([root_pos, global_orient, b[0]['body_pose'], b[0]['right_hand_pose'], b[0]['left_hand_pose']], dim=1).float(),
-            'text': b[1]['caption']
-        }
-        if 'valid_length' in b[1]:
-            d['lengths'] = b[1]['valid_length']
-        
-        # Pass through CLIP features if available
-        if 'headcam' in b[0]:
-            d['headcam'] = b[0]['headcam']
-        for i in range(4):
-            key = f'envcam{i}'
-            if key in b[0]:
-                d[key] = b[0][key]
+        # Handle joint_motion_prediction task with main_motion and sub_motion
+        if isinstance(b[0], dict) and 'main_motion' in b[0]:
+            main_motion = b[0]['main_motion']
+            sub_motion = b[0]['sub_motion']
+            
+            # Process main motion as conditioning
+            main_global_orient = main_motion['global_orient'].unsqueeze(1)
+            main_root_pos = main_motion['root_pos']
+            main_root_pos_pad = torch.zeros((main_root_pos.shape[0], 1, 3)).to(main_root_pos.device)
+            main_root_pos = torch.cat([main_root_pos.unsqueeze(1), main_root_pos_pad], dim=2)
+            main_inp = torch.cat([main_root_pos, main_global_orient, main_motion['body_pose'], 
+                                   main_motion['right_hand_pose'], main_motion['left_hand_pose']], dim=1).float()
+            
+            # Process sub motion as target
+            sub_global_orient = sub_motion['global_orient'].unsqueeze(1)
+            sub_root_pos = sub_motion['root_pos']
+            sub_root_pos_pad = torch.zeros((sub_root_pos.shape[0], 1, 3)).to(sub_root_pos.device)
+            sub_root_pos = torch.cat([sub_root_pos.unsqueeze(1), sub_root_pos_pad], dim=2)
+            sub_inp = torch.cat([sub_root_pos, sub_global_orient, sub_motion['body_pose'], 
+                                  sub_motion['right_hand_pose'], sub_motion['left_hand_pose']], dim=1).float()
+            
+            d = {
+                'main_motion': main_inp,  # Conditioning motion (main person)
+                'inp': sub_inp,            # Target motion (sub person to predict)
+                'text': b[1]['caption']
+            }
+            if 'valid_length' in b[1]:
+                d['lengths'] = b[1]['valid_length']
 
-        adapted_batch.append(d)
+            # Pass through CLIP features if available
+            if 'headcam' in motion:
+                d['headcam'] = motion['headcam']
+            for i in range(4):
+                key = f'envcam{i}'
+                if key in motion:
+                    d[key] = motion[key]
+
+            adapted_batch.append(d)
+
+        else:
+            # Normal shelf assembly motion processing
+            motion = b[0]
+            global_orient = motion['global_orient'].unsqueeze(1)
+            
+            root_pos = motion['root_pos']
+            root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
+            root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
+            
+            d = {
+                'inp': torch.cat([root_pos, global_orient, motion['body_pose'], motion['right_hand_pose'], motion['left_hand_pose']], dim=1).float(),
+                'text': b[1]['caption']
+            }
+            if 'valid_length' in b[1]:
+                d['lengths'] = b[1]['valid_length']
+            
+            # Pass through CLIP features if available
+            if 'headcam' in motion:
+                d['headcam'] = motion['headcam']
+            for i in range(4):
+                key = f'envcam{i}'
+                if key in motion:
+                    d[key] = motion[key]
+
+            adapted_batch.append(d)
 
     # Change order
     # from : [batch_size, frames, njoints, nfeats]
     # to   ; [batch_size, njoints, nfeats, frames]
 
     for b in adapted_batch:
+        if 'main_motion' in b:
+            b['main_motion'] = b['main_motion'].permute(1, 2, 0)
         b['inp'] = b['inp'].permute(1, 2, 0)
 
     return collate(adapted_batch)

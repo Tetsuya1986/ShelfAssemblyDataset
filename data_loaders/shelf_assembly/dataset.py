@@ -63,6 +63,11 @@ class ShelfAssemblyDataset(data.Dataset):
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
             self.opt.max_motion_length, device)
         
+        # For joint_motion_prediction task, reorganize data to pair Main and Sub motions
+        if self.task == 'joint_motion_prediction':
+            self.motion_clip, self.annotation_clip = self._organize_joint_motion_pairs(
+                self.motion_clip, self.annotation_clip)
+        
         self.pre_load = kwargs.get('pre_load_features', False)
         self.feature_cache = {} if self.pre_load else None
         self.dir_cache = {} # Caches list of files in each camera directory
@@ -485,6 +490,68 @@ class ShelfAssemblyDataset(data.Dataset):
 
         return motion_list, annotation_list
 
+    def _organize_joint_motion_pairs(self, motion_list, annotation_list):
+        """
+        Reorganize motion and annotation lists to create pairs of (Main, Sub) motions.
+        For each action, create a sample where Main motion is conditioning and Sub motion is target.
+        
+        :param motion_list: List of motion dictionaries with 'no' and 'main_sub' fields
+        :param annotation_list: List of annotation dictionaries with 'no' and 'main_sub' fields
+        :return: Reorganized (motion_list, annotation_list) with paired Main/Sub samples
+        """
+        # Create mappings by (no, clip_start_frame) to handle multiple clips per action
+        main_motions = {}
+        sub_motions = {}
+        main_annotations = {}
+        sub_annotations = {}
+        
+        for i, (motion, annotation) in enumerate(zip(motion_list, annotation_list)):
+            no = motion['no']
+            main_sub = motion['main_sub']
+            # Use clip_start_frame if available (for prediction mode), else use 0
+            clip_key = motion.get('clip_start_frame', 0)
+            pair_key = (no, clip_key)
+            
+            if main_sub == 'Main':
+                main_motions[pair_key] = motion
+                main_annotations[pair_key] = annotation
+            elif main_sub == 'Sub':
+                sub_motions[pair_key] = motion
+                sub_annotations[pair_key] = annotation
+        
+        # Create paired samples
+        paired_motions = []
+        paired_annotations = []
+        
+        for pair_key in main_motions.keys():
+            if pair_key in sub_motions:
+                # Create a combined motion dict with both Main (as conditioning) and Sub (as target)
+                combined_motion = {
+                    'no': main_motions[pair_key]['no'],
+                    'main_sub': 'Main_Sub_Pair',
+                    'main_motion': main_motions[pair_key],  # Main person's motion (conditioning)
+                    'sub_motion': sub_motions[pair_key],    # Sub person's motion (target to predict)
+                }
+                
+                # Create combined annotation with both
+                combined_annotation = {
+                    'no': main_annotations[pair_key]['no'],
+                    'main_sub': 'Main_Sub_Pair',
+                    'caption': main_annotations[pair_key].get('caption', 'paired_motion'),
+                    'main_annotation': main_annotations[pair_key],
+                    'sub_annotation': sub_annotations[pair_key],
+                }
+                
+                # Copy key fields from main annotation
+                for key in ['shelf_id', 'ass_dis', 'valid_length', 'clip_start_frame', 'clip_end_frame', 'pad_length']:
+                    if key in main_annotations[pair_key]:
+                        combined_annotation[key] = main_annotations[pair_key][key]
+                
+                paired_motions.append(combined_motion)
+                paired_annotations.append(combined_annotation)
+
+        return paired_motions, paired_annotations
+
     def __len__(self):
         return len(self.annotation_clip)
 
@@ -492,6 +559,25 @@ class ShelfAssemblyDataset(data.Dataset):
         motion = copy.deepcopy(self.motion_clip[idx])
         text = self.annotation_clip[idx]
 
+        # For joint_motion_prediction, process both main and sub motions
+        if self.task == 'joint_motion_prediction' and 'main_motion' in motion:
+            main_motion = motion['main_motion']
+            sub_motion = motion['sub_motion']
+            
+            # Process main motion features
+            main_motion = self._load_motion_features(main_motion)
+            # Process sub motion features
+            sub_motion = self._load_motion_features(sub_motion)
+            
+            # Return both motions
+            return {'main_motion': main_motion, 'sub_motion': sub_motion}, text
+        else:
+            # Normal single motion processing
+            motion = self._load_motion_features(motion)
+            return motion, text
+
+    def _load_motion_features(self, motion):
+        """Load camera features for a single motion"""
         # On-demand loading of CLIP features
         if self.use_headcam and 'headcam_info' in motion:
             info = motion['headcam_info']
@@ -530,5 +616,5 @@ class ShelfAssemblyDataset(data.Dataset):
                     if f1 and f2:
                         motion[f'envcam{i}'] = torch.from_numpy(np.stack([self.load_feature(f1), self.load_feature(f2)], axis=0))
             del motion['envcam_info']
-
-        return motion, text
+        
+        return motion
