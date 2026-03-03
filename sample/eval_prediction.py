@@ -100,7 +100,9 @@ def main(args=None):
                               prediction_seconds=args.prediction_seconds,
                               stride=args.stride,
                               split='test',
-                              autoregressive=args.autoregressive)
+                              autoregressive=args.autoregressive,
+                              use_envcam=args.use_envcam,
+                              use_headcam=args.use_headcam)
 
     print(f"Creating MDM model and diffusion... context_len={args.context_len}, pred_len={args.pred_len}")
     model, diffusion = create_model_and_diffusion(args, data)
