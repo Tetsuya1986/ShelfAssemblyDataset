@@ -59,6 +59,9 @@ class ShelfAssemblyDataset(data.Dataset):
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
             self.opt.max_motion_length, device)
 
+        self.motion_clip = self.motion_clip[::5]
+        self.annotation_clip = self.annotation_clip[::5]
+
     def load_split_ids(self, split_file_path):
         split_ids = set()
         with open(split_file_path, 'r') as f:
@@ -78,12 +81,12 @@ class ShelfAssemblyDataset(data.Dataset):
             filename = os.path.basename(filepath)
             if mode in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
                 # Check filename pattern if necessary (e.g. HH check)
-                if len(filename) >= 19 and filename[17:19] == "HH":
+                if len(filename) >= 19 and filename[17:19] == "HR":
                     no = int(filename[:6])
                         
                     # Filter by split
-                    if no not in self.split_ids:
-                        continue
+                    # if no not in self.split_ids:
+                    #     continue
 
                     main_sub = filename[22:26].replace("_", "")
                     dic = {}
@@ -137,13 +140,13 @@ class ShelfAssemblyDataset(data.Dataset):
                     if (
                         filename.lower().endswith("_action.json")
                         and len(filename) >= 19
-                        and filename[17:19] == "HH"
+                        and filename[17:19] == "HR"
                     ):
                         no = int(filename[:6])
 
                         # Filter by split
-                        if no not in self.split_ids:
-                            continue
+                        # if no not in self.split_ids:
+                        #     continue
 
                         filepath = os.path.join(root, filename)
                         with open(filepath, "r") as f:
@@ -155,9 +158,9 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["main_sub"] = "Main"
                             dic["data"] = data["Main_data"]
                             data_list.append(copy.deepcopy(dic))
-                            dic["main_sub"] = "Sub"
-                            dic["data"] = data["Sub_data"]
-                            data_list.append(copy.deepcopy(dic))
+                            # dic["main_sub"] = "Sub"
+                            # dic["data"] = data["Sub_data"]
+                            # data_list.append(copy.deepcopy(dic))
 
         if mode in ["action_task", "action_task_taskcommon"]:
             for root, _, files in os.walk(text_dir):
@@ -166,13 +169,13 @@ class ShelfAssemblyDataset(data.Dataset):
                     if (
                         filename.lower().endswith("_task_specific.json")
                         and len(filename) >= 19
-                        and filename[17:19] == "HH"
+                        and filename[17:19] == "HR"
                     ):
                         no = int(filename[:6])
 
                         # Filter by split
-                        if no not in self.split_ids:
-                            continue
+                        # if no not in self.split_ids:
+                        #     continue
 
                         filepath = os.path.join(root, filename)
                         with open(filepath, "r") as f:
@@ -188,13 +191,13 @@ class ShelfAssemblyDataset(data.Dataset):
                     if (
                         filename.lower().endswith("_task_common.json")
                         and len(filename) >= 19
-                        and filename[17:19] == "HH"
+                        and filename[17:19] == "HR"
                     ):
                         no = int(filename[:6])
 
                         # Filter by split
-                        if no not in self.split_ids:
-                            continue
+                        # if no not in self.split_ids:
+                        #     continue
 
                         filepath = os.path.join(root, filename)
                         with open(filepath, "r") as f:
@@ -217,8 +220,8 @@ class ShelfAssemblyDataset(data.Dataset):
                 video_no = filename[:6]
 
                 # Filter by split
-                if int(video_no) not in self.split_ids:
-                    continue
+                # if int(video_no) not in self.split_ids:
+                #     continue
 
                 if "_Main_" in filename:
                     main_sub = "Main"
@@ -297,8 +300,8 @@ class ShelfAssemblyDataset(data.Dataset):
                 video_no = filename[:6]
 
                 # Filter by split
-                if int(video_no) not in self.split_ids:
-                    continue
+                # if int(video_no) not in self.split_ids:
+                #     continue
                 
                 match_envcam = re.search(r'envcam(\d)', filename)
                 envcam_no = int(match_envcam.group(1))
