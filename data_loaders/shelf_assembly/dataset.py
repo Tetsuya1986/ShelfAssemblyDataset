@@ -58,7 +58,8 @@ class ShelfAssemblyDataset(data.Dataset):
             mode, motion_data, annotation, envcam_img, headcam_img,
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
             self.opt.max_motion_length, device)
-
+        self.motion_clip = self.motion_clip[::3]
+        self.annotation_clip = self.annotation_clip[::3]
     def load_split_ids(self, split_file_path):
         split_ids = set()
         with open(split_file_path, 'r') as f:
@@ -78,7 +79,7 @@ class ShelfAssemblyDataset(data.Dataset):
             filename = os.path.basename(filepath)
             if mode in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
                 # Check filename pattern if necessary (e.g. HH check)
-                if len(filename) >= 19 and filename[17:19] == "HH":
+                if len(filename) >= 19 and filename[17:19] == "HH" and int(filename[9:10]) > 0:
                     no = int(filename[:6])
                         
                     # Filter by split
@@ -138,6 +139,7 @@ class ShelfAssemblyDataset(data.Dataset):
                         filename.lower().endswith("_action.json")
                         and len(filename) >= 19
                         and filename[17:19] == "HH"
+                        and int(filename[9:10]) > 0
                     ):
                         no = int(filename[:6])
 
@@ -167,6 +169,7 @@ class ShelfAssemblyDataset(data.Dataset):
                         filename.lower().endswith("_task_specific.json")
                         and len(filename) >= 19
                         and filename[17:19] == "HH"
+                        and int(filename[9:10]) > 0
                     ):
                         no = int(filename[:6])
 
@@ -189,6 +192,7 @@ class ShelfAssemblyDataset(data.Dataset):
                         filename.lower().endswith("_task_common.json")
                         and len(filename) >= 19
                         and filename[17:19] == "HH"
+                        and int(filename[9:10]) > 0
                     ):
                         no = int(filename[:6])
 
