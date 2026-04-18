@@ -66,14 +66,16 @@ def main():
                               fixed_len=args.pred_len + args.context_len, 
                               pred_len=args.pred_len,
                               device=dist_util.dev(),
-                              hml_mode=args.hml_mode, # 'action' 'action_task'
                               task=args.task,
                               input_seconds=args.input_seconds,
                               prediction_seconds=args.prediction_seconds,
                               stride=args.stride,
                               use_envcam=args.use_envcam,
                               use_headcam=args.use_headcam,
-                              pre_load_features=args.pre_load_features)
+                              pre_load_features=args.pre_load_features,
+                              label_option=args.label_option,
+                              data_sel=args.data_sel,
+                              )
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)

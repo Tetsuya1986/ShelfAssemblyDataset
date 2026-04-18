@@ -89,8 +89,6 @@ def add_base_options(parser):
     group.add_argument("--train_platform_type", default='NoPlatform', choices=['NoPlatform', 'ClearmlPlatform', 'TensorboardPlatform', 'WandBPlatform'], type=str,
                        help="Choose platform to log results. NoPlatform means no logging.")
     group.add_argument("--external_mode", default=False, type=bool, help="For backward cometability, do not change or delete.")
-    group.add_argument("--hml_mode", default='action', type=str,
-                       choices=['action', 'action_task', 'action_taskcommon', 'action_task_taskcommon'], help="Action label mode.")
 
 
 def add_diffusion_options(parser):
@@ -167,6 +165,11 @@ def add_data_options(parser):
                        help="Use environment camera information")
     group.add_argument("--pre_load_features", action='store_true',
                        help="Pre-load CLIP features into memory during initialization.")
+    group.add_argument("--label_option", default='action', choices=['action', 'action_task', 'action_taskcommon', 'action_task_taskcommon'], type=str,
+                       help="Label type")
+    group.add_argument("--data_sel", default='HH', choices=['HH', 'high_proficiency', 'HR'], type=str,
+                       help="Data selection")
+
 
 def add_training_options(parser):
     group = parser.add_argument_group('training')

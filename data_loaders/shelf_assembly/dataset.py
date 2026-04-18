@@ -27,6 +27,8 @@ class ShelfAssemblyDataset(data.Dataset):
         self.opt = get_opt(dataset_opt_path, device)
 
         self.is_autoregressive = kwargs.get('autoregressive', False)
+        label_option = kwargs.get('label_option', None)
+        data_sel = kwargs.get('data_sel', None)
         self.split = split
 
         # Load split IDs
@@ -42,8 +44,8 @@ class ShelfAssemblyDataset(data.Dataset):
         self.use_headcam = kwargs.get('use_headcam')
 
         print(f"Loading dataset {self.opt.dataset_name} (split: {self.split}) ...")
-        motion_data = self.load_motion_data(self.opt.motion_dir, mode, device)
-        annotation = self.load_annotation(self.opt.text_dir, mode, device)
+        motion_data = self.load_motion_data(self.opt.motion_dir, label_option, data_sel)
+        annotation = self.load_annotation(self.opt.text_dir, label_option, data_sel)
 
         # Lazy loading setup (using pre-encoded CLIP features)
         self.headcam_source = {}
@@ -59,10 +61,10 @@ class ShelfAssemblyDataset(data.Dataset):
                 print(f"Warning: No envcam CLIP features found in {self.opt.envcam_clip_dir}")
 
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
-            mode, motion_data, annotation,
+            label_option, motion_data, annotation,
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
-            self.opt.max_motion_length, device)
-        
+            self.opt.max_motion_length, data_sel)
+
         self.pre_load = kwargs.get('pre_load_features', False)
         self.feature_cache = {} if self.pre_load else None
         self.dir_cache = {} # Caches list of files in each camera directory
@@ -78,19 +80,18 @@ class ShelfAssemblyDataset(data.Dataset):
                     split_ids.add(int(line))
         return split_ids
 
-    def load_motion_data(self, motion_dir, mode, device):
+    def load_motion_data(self, motion_dir, label_option, data_sel):
         # output list[dic]. dic={'no','main_sub','global_orient','root_pos','body_ppose','right_hand_pose','left_hand_pose'}
         data_list = []
         file_pattern = os.path.join(motion_dir, "*.npz")
         files = sorted(glob.glob(file_pattern))
-        
+
         for filepath in tqdm(files, desc="Loading motion data"):
             filename = os.path.basename(filepath)
-            if mode in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
-                # Check filename pattern if necessary (e.g. HH check)
-                if len(filename) >= 19 and filename[17:19] == "HH":
+            if label_option in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
+                if self.file_selector(filename, data_sel):
                     no = int(filename[:6])
-                        
+
                     # Filter by split
                     if no not in self.split_ids:
                         continue
@@ -102,34 +103,34 @@ class ShelfAssemblyDataset(data.Dataset):
 
                     try:
                         data = np.load(filepath)
-                        
+
                         # global_orient
                         tensor = torch.tensor(data["global_orient"])
                         dic["global_orient"] = matrix_to_rotation_6d(
                             axis_angle_to_matrix(tensor)
                         )
-                        
+
                         # root_pos
                         dic["root_pos"] = torch.tensor(data["root_pos"])
-                        
+
                         # body_pose
                         tensor = torch.tensor(data["body_pose"])
                         dic["body_pose"] = matrix_to_rotation_6d(
                             axis_angle_to_matrix(tensor)
                         )
-                        
+
                         # right_hand_pose
                         tensor = torch.tensor(data["right_hand_pose"])
                         dic["right_hand_pose"] = matrix_to_rotation_6d(
                             axis_angle_to_matrix(tensor)
                         )
-                        
+
                         # left_hand_pose
                         tensor = torch.tensor(data["left_hand_pose"])
                         dic["left_hand_pose"] = matrix_to_rotation_6d(
                             axis_angle_to_matrix(tensor)
                         )
-                        
+
                         data_list.append(dic)
                     except Exception as e:
                         print(f"Error loading {filepath}: {e}")
@@ -137,18 +138,15 @@ class ShelfAssemblyDataset(data.Dataset):
 
         return data_list
 
-    def load_annotation(self, text_dir, mode, device):
+    def load_annotation(self, text_dir, label_option, data_sel):
         # output list[dic]. dic={'no','main_sub','shelf_id','ass_dis','data'}
         data_list = []
-        if mode in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
+        if label_option in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
             for root, _, files in os.walk(text_dir):
                 sorted_files = sorted(files)
                 for filename in tqdm(sorted_files, desc="Loading annnotation data"):
-                    if (
-                        filename.lower().endswith("_action.json")
-                        and len(filename) >= 19
-                        and filename[17:19] == "HH"
-                    ):
+                    if (filename.lower().endswith("_action.json") and
+                        self.file_selector(filename, data_sel)):
                         no = int(filename[:6])
 
                         # Filter by split
@@ -169,15 +167,12 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["data"] = data["Sub_data"]
                             data_list.append(copy.deepcopy(dic))
 
-        if mode in ["action_task", "action_task_taskcommon"]:
+        if label_option in ["action_task", "action_task_taskcommon"]:
             for root, _, files in os.walk(text_dir):
                 sorted_files = sorted(files)
                 for filename in tqdm(sorted_files, desc="Loading annnotation data"):
-                    if (
-                        filename.lower().endswith("_task_specific.json")
-                        and len(filename) >= 19
-                        and filename[17:19] == "HH"
-                    ):
+                    if (filename.lower().endswith("_task_specific.json") and
+                        self.file_selector(filename, data_sel)):
                         no = int(filename[:6])
 
                         # Filter by split
@@ -191,15 +186,12 @@ class ShelfAssemblyDataset(data.Dataset):
                             for res in results:
                                 res['data_task'] = data['data']
 
-        if mode in ["action_taskcommon", "action_task_taskcommon"]:
+        if label_option in ["action_taskcommon", "action_task_taskcommon"]:
             for root, _, files in os.walk(text_dir):
                 sorted_files = sorted(files)
                 for filename in tqdm(sorted_files, desc="Loading annnotation data"):
-                    if (
-                        filename.lower().endswith("_task_common.json")
-                        and len(filename) >= 19
-                        and filename[17:19] == "HH"
-                    ):
+                    if (filename.lower().endswith("_task_common.json") and
+                        self.file_selector(filename, data_sel)):
                         no = int(filename[:6])
 
                         # Filter by split
@@ -226,12 +218,12 @@ class ShelfAssemblyDataset(data.Dataset):
             video_no = item[:6]
             if not video_no.isdigit() or int(video_no) not in self.split_ids:
                 continue
-            
+
             if video_no not in mapping:
                 mapping[video_no] = {}
-            
+
             full_path = os.path.join(root_directory, item)
-            
+
             if "headcam" in item:
                 main_sub = "Main" if "_Main_" in item else "Sub"
                 mapping[video_no][main_sub] = full_path
@@ -242,10 +234,18 @@ class ShelfAssemblyDataset(data.Dataset):
                     mapping[video_no][f'images{envcam_no}'] = full_path
         return mapping
 
+    def file_selector(self, filename, data_sel):
+        if data_sel == 'HH':
+            return len(filename) >= 19 and filename[17:19] == "HH"
+        elif data_sel == 'high_proficiency':
+            return len(filename) >= 19 and filename[17:19] == "HH" and int(filename[9:10]) > 0
+        else:
+            return False
+
     def load_feature(self, path):
         if self.feature_cache is not None and path in self.feature_cache:
             return self.feature_cache[path]
-        
+
         feature = np.load(path)
         if self.feature_cache is not None:
             self.feature_cache[path] = feature
@@ -256,23 +256,23 @@ class ShelfAssemblyDataset(data.Dataset):
         f_path = os.path.join(dir_path, f"frame_{idx:06d}.npy")
         if os.path.exists(f_path):
             return f_path
-        
+
         # Fallback to first/last if the index is out of bounds
         if dir_path not in self.dir_cache:
             all_frames = sorted(glob.glob(os.path.join(dir_path, "frame_*.npy")))
             self.dir_cache[dir_path] = all_frames
         else:
             all_frames = self.dir_cache[dir_path]
-            
+
         if not all_frames:
             return None
-            
+
         return all_frames[0] if idx == 0 else all_frames[-1]
 
     def pre_load_features(self):
         print("Pre-loading CLIP features into cache...")
         paths_to_load = set()
-        
+
         # 1. Collect all required paths
         for motion in tqdm(self.motion_clip):
             if self.use_headcam and 'headcam_info' in motion:
@@ -286,7 +286,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     p2 = self.resolve_frame_path(path, idx_e)
                     if p1: paths_to_load.add(p1)
                     if p2: paths_to_load.add(p2)
-            
+
             if self.use_envcam and 'envcam_info' in motion:
                 info = motion['envcam_info']
                 vid = info['video_no']
@@ -298,17 +298,17 @@ class ShelfAssemblyDataset(data.Dataset):
                         p2 = self.resolve_frame_path(path, idx_e)
                         if p1: paths_to_load.add(p1)
                         if p2: paths_to_load.add(p2)
-        
+
         # 2. Bulk load features
         for path in tqdm(list(paths_to_load), desc="Loading features"):
             self.load_feature(path)
-        
+
         print(f"Pre-loaded {len(self.feature_cache)} features into memory.")
 
     # Legacy image loading methods removed (no longer used)
 
 
-    def extract_motion_clip(self, mode, motion, annotation,
+    def extract_motion_clip(self, label_option, motion, annotation,
                             fps, envcam_fps, headcam_fps, max_len, device):
         assert len(annotation) == len(motion), (
             f"motion length:{len(motion)} is not the same to annotation length:{len(annotation)}"
@@ -347,7 +347,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     "main_sub": mo["main_sub"]
                 }
 
-                if mode in ["action_task", "action_task_taskcommon"]:
+                if label_option in ["action_task", "action_task_taskcommon"]:
                     for task in ann["data_task"]:
                         start_str = task["s_time"]
                         hours, minutes, seconds = start_str.split(":")
@@ -360,7 +360,7 @@ class ShelfAssemblyDataset(data.Dataset):
                             # base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
                             break
 
-                if mode in ["action_taskcommon", "action_task_taskcommon"]:
+                if label_option in ["action_taskcommon", "action_task_taskcommon"]:
                     for task in ann["data_task_common"]:
                         start_str = task["s_time"]
                         hours, minutes, seconds = start_str.split(":")
@@ -379,7 +379,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     prediction_size_frames = int(self.prediction_seconds * fps)
                     window_size_frames = input_size_frames + prediction_size_frames
                     stride_frames = int(self.stride * fps)
-                    
+
                     action_len = e_frame - s_frame + 1
 
                     if action_len <= input_size_frames:
@@ -497,17 +497,17 @@ class ShelfAssemblyDataset(data.Dataset):
             info = motion['headcam_info']
             vid = info['video_no']
             ms = info['main_sub']
-            
+
             # Default to zero features if missing
             motion['headcam'] = torch.zeros((2, 512))
-            
+
             if vid in self.headcam_source and ms in self.headcam_source[vid]:
                 path = self.headcam_source[vid][ms]
                 idx_s, idx_e = info['indices']
-                
+
                 f1 = self.resolve_frame_path(path, idx_s)
                 f2 = self.resolve_frame_path(path, idx_e)
-                
+
                 if f1 and f2:
                     motion['headcam'] = torch.from_numpy(np.stack([self.load_feature(f1), self.load_feature(f2)], axis=0))
             del motion['headcam_info']
@@ -515,18 +515,18 @@ class ShelfAssemblyDataset(data.Dataset):
         if self.use_envcam and 'envcam_info' in motion:
             info = motion['envcam_info']
             vid = info['video_no']
-            
+
             for i in range(4):
                 # Default to zero features
                 motion[f'envcam{i}'] = torch.zeros((2, 512))
-                
+
                 if vid in self.envcam_source and f'images{i}' in self.envcam_source[vid]:
                     path = self.envcam_source[vid][f'images{i}']
                     idx_s, idx_e = info['indices']
-                    
+
                     f1 = self.resolve_frame_path(path, idx_s)
                     f2 = self.resolve_frame_path(path, idx_e)
-                    
+
                     if f1 and f2:
                         motion[f'envcam{i}'] = torch.from_numpy(np.stack([self.load_feature(f1), self.load_feature(f2)], axis=0))
             del motion['envcam_info']
