@@ -94,13 +94,15 @@ def main(args=None):
                               fixed_len=local_pred_len + history_len, 
                               pred_len=local_pred_len,
                               device=dist_util.dev(),
-                              hml_mode='action',
                               task='prediction',
                               input_seconds=args.input_seconds,
                               prediction_seconds=args.prediction_seconds,
                               stride=args.stride,
                               split='test',
-                              autoregressive=args.autoregressive)
+                              autoregressive=args.autoregressive,
+                              label_option=args.label_option,
+                              data_sel=args.data_sel,
+                              )
 
     print(f"Creating MDM model and diffusion... context_len={args.context_len}, pred_len={args.pred_len}")
     model, diffusion = create_model_and_diffusion(args, data)

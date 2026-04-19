@@ -426,13 +426,15 @@ def load_dataset(args, max_frames, n_frames):
                               batch_size=args.batch_size,
                               num_frames=max_frames,
                               split='test',
-                              hml_mode='action',
                               task=getattr(args, 'task', 'generation'),
                               input_seconds=getattr(args, 'input_seconds', 0.0),
                               prediction_seconds=getattr(args, 'prediction_seconds', 0.0),
                               stride=getattr(args, 'stride', 0.0),
                               autoregressive=getattr(args, 'autoregressive', False),
-                              fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev())
+                              fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev(),
+                              label_option=args.label_option,
+                              data_sel=args.data_sel,
+                              )
     data.fixed_length = n_frames
     return data
 
