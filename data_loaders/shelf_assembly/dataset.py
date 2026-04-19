@@ -163,9 +163,10 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["main_sub"] = "Main"
                             dic["data"] = data["Main_data"]
                             data_list.append(copy.deepcopy(dic))
-                            dic["main_sub"] = "Sub"
-                            dic["data"] = data["Sub_data"]
-                            data_list.append(copy.deepcopy(dic))
+                            if data_sel != 'HR':
+                                dic["main_sub"] = "Sub"
+                                dic["data"] = data["Sub_data"]
+                                data_list.append(copy.deepcopy(dic))
 
         if label_option in ["action_task", "action_task_taskcommon"]:
             for root, _, files in os.walk(text_dir):
@@ -239,6 +240,8 @@ class ShelfAssemblyDataset(data.Dataset):
             return len(filename) >= 19 and filename[17:19] == "HH"
         elif data_sel == 'high_proficiency':
             return len(filename) >= 19 and filename[17:19] == "HH" and int(filename[9:10]) > 0
+        elif data_sel == 'HR':
+            return len(filename) >= 19 and filename[17:19] == "HR"
         else:
             return False
 
