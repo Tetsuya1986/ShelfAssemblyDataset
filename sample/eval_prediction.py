@@ -100,6 +100,8 @@ def main(args=None):
                               stride=args.stride,
                               split='test',
                               autoregressive=args.autoregressive,
+                              use_envcam=args.use_envcam,
+                              use_headcam=args.use_headcam,
                               label_option=args.label_option,
                               data_sel=args.data_sel,
                               )

@@ -100,6 +100,15 @@ class MDM(nn.Module):
                                                                   activation=self.activation)
             self.history_encoder = nn.TransformerEncoder(historyTransEncoderLayer,
                                                          num_layers=self.num_layers)
+            
+            print("MAIN_MOTION_ENC init (for joint motion prediction)")
+            mainMotionTransEncoderLayer = nn.TransformerEncoderLayer(d_model=self.latent_dim,
+                                                                     nhead=self.num_heads,
+                                                                     dim_feedforward=self.ff_size,
+                                                                     dropout=self.dropout,
+                                                                     activation=self.activation)
+            self.main_motion_encoder = nn.TransformerEncoder(mainMotionTransEncoderLayer,
+                                                             num_layers=self.num_layers)
         elif self.arch == 'gru':
             print("GRU init")
             self.gru = nn.GRU(self.latent_dim, self.latent_dim, num_layers=self.num_layers, batch_first=True)
@@ -297,6 +306,30 @@ class MDM(nn.Module):
             if 'text_mask' in locals():
                 memory_mask = text_mask
         # ----------------------------
+        
+        # --- Main Motion Conditioning (for joint_motion_prediction) ---
+        if 'main_motion' in y:
+            main_motion = y['main_motion']
+            main_motion = self.input_process(main_motion)
+            main_motion = self.sequence_pos_encoder(main_motion)
+            main_motion_emb = self.main_motion_encoder(main_motion)  # [main_motion_len, bs, d]
+            
+            # Create a mask for main_motion. `False` means the position is valid.
+            main_motion_mask = torch.zeros((bs, main_motion.shape[0]), dtype=torch.bool, device=x.device)
+            
+            orig_emb_len = emb.shape[0]
+            emb = torch.cat((emb, main_motion_emb), dim=0)
+            
+            if memory_mask is not None:
+                memory_mask = torch.cat((memory_mask, main_motion_mask), dim=1)
+            else:
+                if 'text_mask' in locals():
+                    memory_mask = torch.cat((text_mask, main_motion_mask), dim=1)
+                else:
+                    # clip / action / no_cond / add policy
+                    orig_mask = torch.zeros((bs, orig_emb_len), dtype=torch.bool, device=x.device)
+                    memory_mask = torch.cat((orig_mask, main_motion_mask), dim=1)
+        # ---------------------------------------------------------------
 
         if self.arch == 'gru':
             x_reshaped = x.reshape(bs, njoints*nfeats, 1, nframes)
