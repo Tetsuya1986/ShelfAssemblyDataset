@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
+import panda as pd
 from torch.utils import data
 from tqdm import tqdm
 from tqdm.contrib import tzip
@@ -46,6 +47,9 @@ class ShelfAssemblyDataset(data.Dataset):
         print(f"Loading dataset {self.opt.dataset_name} (split: {self.split}) ...")
         motion_data = self.load_motion_data(self.opt.motion_dir, label_option, data_sel)
         annotation = self.load_annotation(self.opt.text_dir, label_option, data_sel)
+        if data_sel == 'HR':
+            robot_data = self.load_robot_data(self.opt.motion_dir, label_option, data_sel)
+        print(f"Loading dataset - Completed")
 
         # Lazy loading setup (using pre-encoded CLIP features)
         self.headcam_source = {}
@@ -206,7 +210,64 @@ class ShelfAssemblyDataset(data.Dataset):
                             for res in results:
                                 res['data_task_common'] = data['data']
 
+    def load_robot_data(self, motion_dir, label_option, data_sel):
+        # output list[dic]. dic={'no','main_sub','global_orient','root_pos','EE_pos','EE_rot', 'timestamps'}
+        data_list = []
+        file_pattern = os.path.join(motion_dir, "*.csv")
+        files = sorted(glob.glob(file_pattern))
+
+        for filepath in tqdm(files, desc="Loading motion data"):
+            filename = os.path.basename(filepath)
+            if label_option in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
+                # Check filename pattern if necessary (e.g. HH check)
+                if self.file_selector(filename, data_sel):
+                    no = int(filename[:6])
+
+                    # Filter by split
+                    if no not in self.split_ids:
+                        continue
+
+                    main_sub = filename[22:26].replace("_", "")
+                    dic = {}
+                    dic["no"] = no
+                    dic["main_sub"] = main_sub
+
+                    try:
+                        df = pd.read_csv(filepath)
+                        columns = df.columns.tolist()
+
+                        # Extract timestamp
+                        timestamp_col = 'Time (Seconds)'
+                        dic['timestamps'] = df['Time (Seconds)'].values.astype(np.float32)
+
+                        # Extract FrankaEE position (end-effector)
+                        ee_pos_cols = [c for c in columns if c in ['FrankaEE_PosX', 'FrankaEE_PosY', 'FrankaEE_PosZ']]
+                        if len(ee_pos_cols) == 3:
+                            dic['EE_pos'] = df[['FrankaEE_PosX', 'FrankaEE_PosY', 'FrankaEE_PosZ']].values.astype(np.float32)
+
+                        # Extract FrankaEE quaternion
+                        ee_quat_cols = [c for c in columns if c in ['FrankaEE_RotX', 'FrankaEE_RotY', 'FrankaEE_RotZ', 'FrankaEE_RotW']]
+                        if len(ee_quat_cols) == 4:
+                            dic['EE_rot'] = df[['FrankaEE_RotX', 'FrankaEE_RotY', 'FrankaEE_RotZ', 'FrankaEE_RotW']].values.astype(np.float32)
+
+                        # Also extract Franka arm base position if available
+                        arm_pos_cols = [c for c in columns if c in ['Franka_PosX', 'Franka_PosY', 'Franka_PosZ']]
+                        if len(arm_pos_cols) == 3:
+                            dic['root_pos'] = df[['Franka_PosX', 'Franka_PosY', 'Franka_PosZ']].values.astype(np.float32)
+
+                        # Extract Franka arm base quaternion if available
+                        arm_quat_cols = [c for c in columns if c in ['Franka_RotX', 'Franka_RotY', 'Franka_RotZ', 'Franka_RotW']]
+                        if len(arm_quat_cols) == 4:
+                            dic['global_orient'] = df[['Franka_RotX', 'Franka_RotY', 'Franka_RotZ', 'Franka_RotW']].values.astype(np.float32)
+
+                        import pdb; pdb.set_trace()
+                        data_list.append(dic)
+                    except Exception as e:
+                        print(f"Error loading {filepath}: {e}")
+                        continue
+
         return data_list
+
     def get_cam_source_mapping(self, root_directory):
         mapping = {}
         if not os.path.isdir(root_directory):

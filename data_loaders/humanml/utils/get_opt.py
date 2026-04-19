@@ -76,6 +76,7 @@ def get_opt(opt_path, device):
         opt.envcam_dir = pjoin(opt.data_root, 'envcam_img_npy')
         opt.headcam_clip_dir = pjoin(opt.data_root, 'headcam_clip_features')
         opt.envcam_clip_dir = pjoin(opt.data_root, 'envcam_clip_features')
+        opt.robot_dir = pjoin(opt.data_root, 'mocap')
         opt.joints_num = 51
         opt.dim_pose = 251
         opt.max_motion_length = 300
