@@ -167,7 +167,7 @@ def add_data_options(parser):
                        help="Pre-load CLIP features into memory during initialization.")
     group.add_argument("--label_option", default='action', choices=['action', 'action_task', 'action_taskcommon', 'action_task_taskcommon'], type=str,
                        help="Label type")
-    group.add_argument("--data_sel", default='HH', choices=['HH', 'high_proficiency', 'HR'], type=str,
+    group.add_argument("--data_sel", default='HH', choices=['HH', 'high_proficiency', 'HR-predictH', 'HR-predictR'], type=str,
                        help="Data selection")
 
 

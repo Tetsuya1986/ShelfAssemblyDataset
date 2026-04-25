@@ -8,10 +8,11 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-import panda as pd
+import pandas as pd
 from torch.utils import data
 from tqdm import tqdm
 from tqdm.contrib import tzip
+from itertools import zip_longest
 
 from data_loaders.humanml.utils.get_opt import get_opt
 from utils.rotation_conversions import axis_angle_to_matrix, matrix_to_rotation_6d
@@ -45,10 +46,15 @@ class ShelfAssemblyDataset(data.Dataset):
         self.use_headcam = kwargs.get('use_headcam')
 
         print(f"Loading dataset {self.opt.dataset_name} (split: {self.split}) ...")
-        motion_data = self.load_motion_data(self.opt.motion_dir, label_option, data_sel)
+
+        motion_data = []
+        robot_data = []
+        if data_sel in ['HR-predictR']:
+            robot_data = self.load_robot_data(self.opt.robot_dir, label_option, data_sel)
+        else:
+            motion_data = self.load_motion_data(self.opt.motion_dir, label_option, data_sel)
         annotation = self.load_annotation(self.opt.text_dir, label_option, data_sel)
-        if data_sel == 'HR':
-            robot_data = self.load_robot_data(self.opt.motion_dir, label_option, data_sel)
+
         print(f"Loading dataset - Completed")
 
         # Lazy loading setup (using pre-encoded CLIP features)
@@ -65,7 +71,7 @@ class ShelfAssemblyDataset(data.Dataset):
                 print(f"Warning: No envcam CLIP features found in {self.opt.envcam_clip_dir}")
 
         self.motion_clip, self.annotation_clip = self.extract_motion_clip(
-            label_option, motion_data, annotation,
+            label_option, motion_data, robot_data, annotation,
             self.opt.fps, self.opt.envcam_fps, self.opt.headcam_fps,
             self.opt.max_motion_length, data_sel)
 
@@ -164,10 +170,11 @@ class ShelfAssemblyDataset(data.Dataset):
                             dic["no"] = data["no"]
                             dic["shelf_id"] = data["shelf_id"]
                             dic["ass_dis"] = data["ass_dis"]
-                            dic["main_sub"] = "Main"
-                            dic["data"] = data["Main_data"]
-                            data_list.append(copy.deepcopy(dic))
-                            if data_sel != 'HR':
+                            if data_sel not in ['HR-predictR']:
+                                dic["main_sub"] = "Main"
+                                dic["data"] = data["Main_data"]
+                                data_list.append(copy.deepcopy(dic))
+                            if data_sel not in  ['HR-predictH']:
                                 dic["main_sub"] = "Sub"
                                 dic["data"] = data["Sub_data"]
                                 data_list.append(copy.deepcopy(dic))
@@ -210,13 +217,15 @@ class ShelfAssemblyDataset(data.Dataset):
                             for res in results:
                                 res['data_task_common'] = data['data']
 
+        return data_list
+
     def load_robot_data(self, motion_dir, label_option, data_sel):
         # output list[dic]. dic={'no','main_sub','global_orient','root_pos','EE_pos','EE_rot', 'timestamps'}
         data_list = []
         file_pattern = os.path.join(motion_dir, "*.csv")
         files = sorted(glob.glob(file_pattern))
 
-        for filepath in tqdm(files, desc="Loading motion data"):
+        for filepath in tqdm(files, desc="Loading robot motion data"):
             filename = os.path.basename(filepath)
             if label_option in ["action", "action_task", "action_taskcommon", "action_task_taskcommon"]:
                 # Check filename pattern if necessary (e.g. HH check)
@@ -260,7 +269,6 @@ class ShelfAssemblyDataset(data.Dataset):
                         if len(arm_quat_cols) == 4:
                             dic['global_orient'] = df[['Franka_RotX', 'Franka_RotY', 'Franka_RotZ', 'Franka_RotW']].values.astype(np.float32)
 
-                        import pdb; pdb.set_trace()
                         data_list.append(dic)
                     except Exception as e:
                         print(f"Error loading {filepath}: {e}")
@@ -301,7 +309,9 @@ class ShelfAssemblyDataset(data.Dataset):
             return len(filename) >= 19 and filename[17:19] == "HH"
         elif data_sel == 'high_proficiency':
             return len(filename) >= 19 and filename[17:19] == "HH" and int(filename[9:10]) > 0
-        elif data_sel == 'HR':
+        elif data_sel == 'HR-predictH':
+            return len(filename) >= 19 and filename[17:19] == "HR"
+        elif data_sel == 'HR-predictR':
             return len(filename) >= 19 and filename[17:19] == "HR"
         else:
             return False
@@ -372,18 +382,28 @@ class ShelfAssemblyDataset(data.Dataset):
     # Legacy image loading methods removed (no longer used)
 
 
-    def extract_motion_clip(self, label_option, motion, annotation,
-                            fps, envcam_fps, headcam_fps, max_len, device):
-        assert len(annotation) == len(motion), (
-            f"motion length:{len(motion)} is not the same to annotation length:{len(annotation)}"
+    def extract_motion_clip(self, label_option, motion, robot, annotation,
+                            fps, envcam_fps, headcam_fps, max_len, data_sel):
+
+        assert (len(annotation) == len(motion)) or (len(annotation) == len(robot)), (
+            f"motion length:{len(motion)} or robot motion length{len(robot)}\
+            is not the same to annotation length:{len(annotation)}"
         )
 
         motion_list = []
         annotation_list = []
 
-        for ann, mo in tzip(annotation, motion):
-            assert ann["no"] == mo["no"]
-            assert ann["main_sub"] == mo["main_sub"]
+        for ann, mo, ro in tqdm(zip_longest(annotation, motion, robot, fillvalue=None), desc='extract_data'):
+            if mo == None:
+                assert ann["no"] == ro["no"]
+                assert ann["main_sub"] == ro["main_sub"]
+                no = ro["no"]
+                main_sub = ro["main_sub"]
+            else:
+                assert ann["no"] == mo["no"]
+                assert ann["main_sub"] == mo["main_sub"]
+                no = mo["no"]
+                main_sub = mo["main_sub"]
 
             video_no_str = f"{ann['no']:06d}"
 
@@ -407,8 +427,8 @@ class ShelfAssemblyDataset(data.Dataset):
                 }
 
                 base_mdic = {
-                    "no": mo["no"],
-                    "main_sub": mo["main_sub"]
+                    "no": no,
+                    "main_sub": main_sub
                 }
 
                 if label_option in ["action_task", "action_task_taskcommon"]:
