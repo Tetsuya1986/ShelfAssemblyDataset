@@ -26,7 +26,6 @@ def main(args=None):
     if args is None:
         # args is None unless this method is called from another function (e.g. during training)
         args = generate_args()
-
     fixseed(args.seed)
     out_path = args.output_dir
     if args.dataset == 'humanml':
@@ -312,7 +311,10 @@ def main(args=None):
     if args.dataset == 'kit':
         skeleton = paramUtil.kit_kinematic_chain
     elif args.dataset == 'shelf_assembly':
-        skeleton = paramUtil.t2m_kinematic_chain + paramUtil.t2m_left_hand_chain + paramUtil.t2m_right_hand_chain
+        if args.data_sel == 'HR-predictR':
+            skeleton = paramUtil.franka_arm_chain
+        else:
+            skeleton = paramUtil.t2m_kinematic_chain + paramUtil.t2m_left_hand_chain + paramUtil.t2m_right_hand_chain
     else:
         skeleton = paramUtil.t2m_kinematic_chain
 
@@ -430,6 +432,8 @@ def load_dataset(args, max_frames, n_frames):
                               input_seconds=getattr(args, 'input_seconds', 0.0),
                               prediction_seconds=getattr(args, 'prediction_seconds', 0.0),
                               stride=getattr(args, 'stride', 0.0),
+                              use_envcam=args.use_envcam,
+                              use_headcam=args.use_headcam,
                               autoregressive=getattr(args, 'autoregressive', False),
                               fixed_len=args.pred_len + args.context_len, pred_len=args.pred_len, device=dist_util.dev(),
                               label_option=args.label_option,

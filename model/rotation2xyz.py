@@ -22,7 +22,10 @@ class Rotation2xyz:
                  jointstype, vertstrans, betas=None, beta=0,
                  glob_rot=None, get_rotations_back=False, **kwargs):
         if pose_rep == "xyz":
-            return x
+            if self.dataset == 'shelf_assembly':
+                return x[:, 1:, :3, :]
+            else:
+                return x
 
         if mask is None:
             mask = torch.ones((x.shape[0], x.shape[-1]), dtype=bool, device=x.device)
@@ -36,7 +39,10 @@ class Rotation2xyz:
         if translation:
             if self.dataset == 'shelf_assembly':
                 x_translations = x[:, 0, :3]
-                x_rotations = x[:, 1:]
+                if pose_rep == 'rotquat':
+                    x_rotations = x[:,1:,3:]
+                else:
+                    x_rotations = x[:, 1:]
             else:
                 x_translations = x[:, -1, :3]
                 x_rotations = x[:, :-1]
@@ -92,7 +98,7 @@ class Rotation2xyz:
             betas = torch.zeros([body_pose.shape[0], self.smpl_model.num_betas],
                                 dtype=rotations.dtype, device=rotations.device)
             betas[:, 1] = beta
-            # import ipdb; ipdb.set_trace()
+
         out = self.smpl_model(body_pose=body_pose, global_orient=global_orient, betas=betas, **hand_kwargs)
 
         # get the desirable joints

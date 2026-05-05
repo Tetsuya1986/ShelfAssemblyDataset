@@ -107,21 +107,57 @@ def t2m_prefix_collate(batch, pred_len):
 def shelf_assembly_collate(batch):
     adapted_batch = []
     for b in batch:
-        # global_orient: (T, 6) -> (T, 1, 6)
-        global_orient = b[0]['global_orient'].unsqueeze(1)
-        
-        # root_pos: (T, 3) -> (T, 1, 6) with padding
-        root_pos = b[0]['root_pos']
-        root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
-        root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
-        
-        d = {
-            'inp': torch.cat([root_pos, global_orient, b[0]['body_pose'], b[0]['right_hand_pose'], b[0]['left_hand_pose']], dim=1).float(),
-            'text': b[1]['caption']
-        }
+        # Detect if this is robot EE trajectory data or human motion data
+        is_robot_ee = 'EE_pos' in b[0]
+
+        if is_robot_ee:
+            # Handle robot EE trajectory data
+            # Format: 2 joints x 7 features
+            # Joint 0: root_pos (3) + global_orient (4)
+            # Joint 1: EE_pos (3) + EE_rot (4)
+            ee_pos = b[0]['EE_pos']  # (T, 3)
+            ee_rot = b[0]['EE_rot']  # (T, 4)
+
+            # Include arm base position and orientation if available
+            if 'root_pos' in b[0]:
+                root_pos = b[0]['root_pos']  # (T, 3)
+            else:
+                root_pos = torch.zeros((ee_pos.shape[0], 3)).to(ee_pos.device)
+
+            if 'global_orient' in b[0]:
+                global_orient = b[0]['global_orient']  # (T, 4)
+            else:
+                global_orient = torch.zeros((ee_pos.shape[0], 4)).to(ee_pos.device)
+
+            # Stack as (T, 2, 7)
+            # Joint 0: [root_pos (3) + global_orient (4)]
+            # Joint 1: [EE_pos (3) + EE_rot (4)]
+            joint_0 = torch.cat([root_pos, global_orient], dim=1).unsqueeze(1)  # (T, 1, 7)
+            joint_1 = torch.cat([ee_pos, ee_rot], dim=1).unsqueeze(1)  # (T, 1, 7)
+            inp = torch.cat([joint_0, joint_1], dim=1)  # (T, 2, 7)
+
+            d = {
+                'inp': inp.float(),
+                'text': b[1]['caption']
+            }
+        else:
+            # Handle human motion data (existing logic)
+            # global_orient: (T, 6) -> (T, 1, 6)
+            global_orient = b[0]['global_orient'].unsqueeze(1)
+
+            # root_pos: (T, 3) -> (T, 1, 6) with padding
+            root_pos = b[0]['root_pos']
+            root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
+            root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
+
+            d = {
+                'inp': torch.cat([root_pos, global_orient, b[0]['body_pose'], b[0]['right_hand_pose'], b[0]['left_hand_pose']], dim=1).float(),
+                'text': b[1]['caption']
+            }
+
         if 'valid_length' in b[1]:
             d['lengths'] = b[1]['valid_length']
-        
+
         # Pass through CLIP features if available
         if 'headcam' in b[0]:
             d['headcam'] = b[0]['headcam']

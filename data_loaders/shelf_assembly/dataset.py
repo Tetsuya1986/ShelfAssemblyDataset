@@ -459,6 +459,7 @@ class ShelfAssemblyDataset(data.Dataset):
 
                 # Logic for prediction mode
                 if self.task == 'prediction':
+                    # Calculate frame sizes based on fps
                     input_size_frames = int(self.input_seconds * fps)
                     prediction_size_frames = int(self.prediction_seconds * fps)
                     window_size_frames = input_size_frames + prediction_size_frames
@@ -470,6 +471,9 @@ class ShelfAssemblyDataset(data.Dataset):
                         continue # Skip actions shorter than input length
 
                     if not self.is_autoregressive:
+                        # Determine if we're dealing with robot or human data
+                        is_robot_data = (mo is None and ro is not None)
+
                         # Sliding window
                         for current_start in range(s_frame, e_frame - input_size_frames + 1, stride_frames):
                             current_end = current_start + window_size_frames - 1
@@ -480,13 +484,6 @@ class ShelfAssemblyDataset(data.Dataset):
 
                             mdic = copy.deepcopy(base_mdic)
 
-                            # Extract the valid portion
-                            body_pose = mo["body_pose"][current_start : real_end + 1]
-                            global_orient = mo["global_orient"][current_start : real_end + 1]
-                            left_hand_pose = mo["left_hand_pose"][current_start : real_end + 1]
-                            right_hand_pose = mo["right_hand_pose"][current_start : real_end + 1]
-                            root_pos = mo["root_pos"][current_start : real_end + 1]
-
                             # Pad with zeros if necessary along the frame dimension
                             def pad_tensor(t):
                                 if pad_length > 0:
@@ -494,11 +491,53 @@ class ShelfAssemblyDataset(data.Dataset):
                                     return F.pad(t, padding, mode='constant', value=0)
                                 return t
 
-                            mdic["body_pose"] = pad_tensor(body_pose)
-                            mdic["global_orient"] = pad_tensor(global_orient)
-                            mdic["left_hand_pose"] = pad_tensor(left_hand_pose)
-                            mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
-                            mdic["root_pos"] = pad_tensor(root_pos)
+                            if is_robot_data:
+                                # Handle robot EE trajectory data
+                                # Convert frame indices to timestamps and extract from robot data
+                                start_time = current_start / fps
+                                end_time = (real_end + 1) / fps
+
+                                # Find indices in robot data based on timestamps
+                                if 'timestamps' in ro:
+                                    timestamps = ro['timestamps']
+                                    # Find frames within the time window
+                                    time_mask = (timestamps >= start_time) & (timestamps <= end_time)
+                                    valid_indices = np.where(time_mask)[0]
+
+                                    if len(valid_indices) > 0:
+                                        # Extract data for these indices
+                                        if 'EE_pos' in ro:
+                                            ee_pos = torch.tensor(ro["EE_pos"][valid_indices], dtype=torch.float32)
+                                            mdic["EE_pos"] = pad_tensor(ee_pos)
+
+                                        if 'EE_rot' in ro:
+                                            ee_rot = torch.tensor(ro["EE_rot"][valid_indices], dtype=torch.float32)
+                                            mdic["EE_rot"] = pad_tensor(ee_rot)
+
+                                        if 'root_pos' in ro:
+                                            root_pos = torch.tensor(ro["root_pos"][valid_indices], dtype=torch.float32)
+                                            mdic["root_pos"] = pad_tensor(root_pos)
+
+                                        if 'global_orient' in ro:
+                                            global_orient = torch.tensor(ro["global_orient"][valid_indices], dtype=torch.float32)
+                                            mdic["global_orient"] = pad_tensor(global_orient)
+                                    else:
+                                        assert(False)
+
+                            else:
+                                # Handle human motion data
+                                # Extract the valid portion
+                                body_pose = mo["body_pose"][current_start : real_end + 1]
+                                global_orient = mo["global_orient"][current_start : real_end + 1]
+                                left_hand_pose = mo["left_hand_pose"][current_start : real_end + 1]
+                                right_hand_pose = mo["right_hand_pose"][current_start : real_end + 1]
+                                root_pos = mo["root_pos"][current_start : real_end + 1]
+
+                                mdic["body_pose"] = pad_tensor(body_pose)
+                                mdic["global_orient"] = pad_tensor(global_orient)
+                                mdic["left_hand_pose"] = pad_tensor(left_hand_pose)
+                                mdic["right_hand_pose"] = pad_tensor(right_hand_pose)
+                                mdic["root_pos"] = pad_tensor(root_pos)
 
                             # Extract envcam image metadata
                             if self.use_envcam:
@@ -534,19 +573,33 @@ class ShelfAssemblyDataset(data.Dataset):
                     e_frame = s_frame + max_len - 1
 
                 mdic = copy.deepcopy(base_mdic)
-                mdic["body_pose"] = mo["body_pose"][
-                    s_frame : e_frame + 1
-                ]  # .to(device)
-                mdic["global_orient"] = mo["global_orient"][
-                    s_frame : e_frame + 1
-                ]  # .to(device)
-                mdic["left_hand_pose"] = mo["left_hand_pose"][
-                    s_frame : e_frame + 1
-                ]  # .to(device)
-                mdic["right_hand_pose"] = mo["right_hand_pose"][
-                    s_frame : e_frame + 1
-                ]  # .to(device)
-                mdic["root_pos"] = mo["root_pos"][s_frame : e_frame + 1]  # .to(device)
+
+                # Check if we're dealing with robot or human data
+                if mo is not None:
+                    # Human motion data
+                    mdic["body_pose"] = mo["body_pose"][
+                        s_frame : e_frame + 1
+                    ]  # .to(device)
+                    mdic["global_orient"] = mo["global_orient"][
+                        s_frame : e_frame + 1
+                    ]  # .to(device)
+                    mdic["left_hand_pose"] = mo["left_hand_pose"][
+                        s_frame : e_frame + 1
+                    ]  # .to(device)
+                    mdic["right_hand_pose"] = mo["right_hand_pose"][
+                        s_frame : e_frame + 1
+                    ]  # .to(device)
+                    mdic["root_pos"] = mo["root_pos"][s_frame : e_frame + 1]  # .to(device)
+                else:
+                    # Robot EE trajectory data
+                    if 'EE_pos' in ro:
+                        mdic["EE_pos"] = torch.tensor(ro["EE_pos"][s_frame : e_frame + 1], dtype=torch.float32)
+                    if 'EE_rot' in ro:
+                        mdic["EE_rot"] = torch.tensor(ro["EE_rot"][s_frame : e_frame + 1], dtype=torch.float32)
+                    if 'root_pos' in ro:
+                        mdic["root_pos"] = torch.tensor(ro["root_pos"][s_frame : e_frame + 1], dtype=torch.float32)
+                    if 'global_orient' in ro:
+                        mdic["global_orient"] = torch.tensor(ro["global_orient"][s_frame : e_frame + 1], dtype=torch.float32)
 
                 if self.use_envcam:
                     mdic["envcam_info"] = {

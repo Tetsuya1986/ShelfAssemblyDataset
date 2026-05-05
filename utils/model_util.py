@@ -57,7 +57,7 @@ def load_model_wo_clip(model, state_dict):
     assert len(unexpected_keys) == 0
     assert all(
         [
-            k.startswith("clip_model.") or "sequence_pos_encoder" in k
+            k.startswith("clip_model.") or "sequence_pos_encoder" or k.startswith("embed_cam.") in k
             for k in missing_keys
         ]
     )
@@ -96,9 +96,19 @@ def get_model_args(args, data):
         njoints = 251
         nfeats = 1
     elif args.dataset == "shelf_assembly":
-        data_rep = "rot6d"
-        njoints = 53
-        nfeats = 6
+        # Check if we're using robot EE trajectory data
+        is_robot_data = (hasattr(args, 'data_sel') and args.data_sel == 'HR-predictR')
+
+        if is_robot_data:
+            # Robot EE trajectory: root_pos(3) + global_orient(4) + EE_pos(3) + EE_rot(4) = 14 features
+            data_rep = "xyz"
+            njoints = 2  # root_arm (3+4=7 features) and EE (3+4=7 features)
+            nfeats = 7
+        else:
+            # Human motion data
+            data_rep = "rot6d"
+            njoints = 53
+            nfeats = 6
 
     # Compatibility with old models
     if not hasattr(args, "pred_len"):
