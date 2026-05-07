@@ -82,6 +82,27 @@ def get_opt(opt_path, device):
         opt.fps = 30
         opt.envcam_fps = 5
         opt.headcam_fps = 5
+    elif opt.dataset_name == 'core4d':
+        opt.data_root = '/data/umihebi0/users/narita/CORE4D_Real'
+        opt.motion_dir = pjoin(opt.data_root, 'prepared_motion_forecasting')
+        opt.text_dir = pjoin(opt.data_root)
+        opt.headcam_dir = pjoin(opt.data_root, 'egocentric_RGB_videos')
+        opt.envcam_dir = pjoin(opt.data_root, 'allocentric_RGB_videos')
+        opt.headcam_clip_dir = pjoin(opt.data_root, 'headcam_clip_features')
+        opt.envcam_clip_dir = pjoin(opt.data_root, 'envcam_clip_features')
+        opt.joints_num = 53
+        opt.dim_pose = 251
+        opt.max_motion_length = 300
+        opt.fps = 30
+    elif opt.dataset_name == 'comad':
+        opt.data_root = '/data/umihebi0/users/narita/CoMaD'
+        opt.mapping_json = '/data/umihebi0/users/narita/CoMaD/comad_mapping.json'
+        opt.motion_dir = pjoin(opt.data_root)
+        opt.text_dir = pjoin(opt.data_root)
+        opt.joints_num = 9
+        opt.dim_pose = 251
+        opt.max_motion_length = 300
+        opt.fps = 30
     else:
         raise KeyError('Dataset not recognized')
 

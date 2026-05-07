@@ -145,7 +145,7 @@ def add_model_options(parser):
 
 def add_data_options(parser):
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc', 'shelf_assembly'], type=str,
+    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc', 'shelf_assembly', 'core4d', 'comad'], type=str,
                        help="Dataset name (choose from list).")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
@@ -307,7 +307,7 @@ def get_cond_mode(args):
     elif getattr(args, 'task', 'generation') == 'joint_motion_prediction':
         # For joint motion prediction, use both text (action) and motion conditioning
         cond_mode = 'text_motion'
-    elif args.dataset in ['kit', 'humanml', 'shelf_assembly']:
+    elif args.dataset in ['kit', 'humanml', 'shelf_assembly', 'core4d', 'comad']:
         cond_mode = 'text'
     else:
         cond_mode = 'action'

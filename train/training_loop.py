@@ -93,9 +93,10 @@ class TrainLoop:
             )
 
         if self.resume_step:
-            self._load_optimizer_state()
-            # Model was resumed, either due to a restart or a checkpoint
-            # being specified at the command line.
+            if args.dataset not in ['comad', 'core4d']:
+                self._load_optimizer_state()
+                # Model was resumed, either due to a restart or a checkpoint
+                # being specified at the command line.
 
         self.device = torch.device("cpu")
         if torch.cuda.is_available() and dist_util.dev() != 'cpu':
@@ -169,7 +170,6 @@ class TrainLoop:
             state_dict = dist_util.load_state_dict(
                 opt_checkpoint, map_location=dist_util.dev()
             )
-
             if self.use_fp16:
                 if 'scaler' not in state_dict:
                     print("scaler state not found ... not loading it.")

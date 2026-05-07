@@ -73,7 +73,7 @@ def main(args=None):
 
     if args.dataset == 'kit':
         fps = 12.5
-    elif args.dataset == 'shelf_assembly':
+    elif args.dataset in ['shelf_assembly', 'comad', 'core4d']:
         fps = 30.0
     else:
         fps = 20.0

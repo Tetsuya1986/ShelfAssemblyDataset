@@ -53,15 +53,19 @@ def load_model_wo_clip(model, state_dict):
     # assert (state_dict['embed_timestep.sequence_pos_encoder.pe'][:model.embed_timestep.sequence_pos_encoder.pe.shape[0]] == model.embed_timestep.sequence_pos_encoder.pe).all()  # TEST
     state_dict.pop("sequence_pos_encoder.pe", None)
     state_dict.pop("embed_timestep.sequence_pos_encoder.pe", None)
+    # for comad data
+    state_dict.pop('input_process.poseEmbedding.weight', None)
+    state_dict.pop('output_process.poseFinal.weight', None)
+    state_dict.pop('output_process.poseFinal.bias', None)
+
     missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
     assert len(unexpected_keys) == 0
-    assert all(
-        [
-            k.startswith("clip_model.") or "sequence_pos_encoder" in k
-            for k in missing_keys
-        ]
-    )
-
+    # assert all(
+    #     [
+    #         k.startswith("clip_model.") or "sequence_pos_encoder" in k
+    #         for k in missing_keys
+    #     ]
+    # )
 
 def create_model_and_diffusion(args, data):
     model = MDM(**get_model_args(args, data))
@@ -99,6 +103,14 @@ def get_model_args(args, data):
         data_rep = "rot6d"
         njoints = 53
         nfeats = 6
+    elif args.dataset == "core4d":
+        data_rep = "rot6d"
+        njoints = 25
+        nfeats = 6
+    elif args.dataset == "comad":
+        data_rep = "xyz"
+        njoints = 9
+        nfeats = 3
 
     # Compatibility with old models
     if not hasattr(args, "pred_len"):

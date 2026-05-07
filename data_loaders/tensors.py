@@ -116,7 +116,7 @@ def shelf_assembly_collate(batch):
         if isinstance(b[0], dict) and 'main_motion' in b[0]:
             main_motion = b[0]['main_motion']
             sub_motion = b[0]['sub_motion']
-            
+
             # Process main motion as conditioning
             main_global_orient = main_motion['global_orient'].unsqueeze(1)
             main_root_pos = main_motion['root_pos']
@@ -162,18 +162,18 @@ def shelf_assembly_collate(batch):
             # Normal shelf assembly motion processing
             motion = b[0]
             global_orient = motion['global_orient'].unsqueeze(1)
-            
+
             root_pos = motion['root_pos']
             root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
             root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
-            
+
             d = {
                 'inp': torch.cat([root_pos, global_orient, motion['body_pose'], motion['right_hand_pose'], motion['left_hand_pose']], dim=1).float(),
                 'text': b[1]['caption']
             }
             if 'valid_length' in b[1]:
                 d['lengths'] = b[1]['valid_length']
-            
+
             # Pass through CLIP features if available
             if 'headcam' in motion:
                 d['headcam'] = motion['headcam']
@@ -191,6 +191,55 @@ def shelf_assembly_collate(batch):
     for b in adapted_batch:
         if 'main_motion' in b:
             b['main_motion'] = b['main_motion'].permute(1, 2, 0)
+        b['inp'] = b['inp'].permute(1, 2, 0)
+
+    return collate(adapted_batch)
+
+def core4d_collate(batch):
+    adapted_batch = []
+    for b in batch:
+        motion = b[0]
+        global_orient = motion['global_orient'].unsqueeze(1)
+
+        root_pos = motion['root_pos']
+        root_pos_pad = torch.zeros((root_pos.shape[0], 1, 3)).to(root_pos.device)
+        root_pos = torch.cat([root_pos.unsqueeze(1), root_pos_pad], dim=2)
+
+        right_hand_pose = motion['right_hand_pose'].unsqueeze(1)
+        left_hand_pose = motion['right_hand_pose'].unsqueeze(1)
+
+        d = {
+            'inp': torch.cat([root_pos, global_orient, motion['body_pose'], right_hand_pose, left_hand_pose], dim=1).float(),
+            'text': ''
+        }
+
+        adapted_batch.append(d)
+
+    for b in adapted_batch:
+        # Change order
+        # from : [batch_size, frames, njoints, nfeats]
+        # to   ; [batch_size, njoints, nfeats, frames]
+        b['inp'] = b['inp'].permute(1, 2, 0)
+
+    return collate(adapted_batch)
+
+def comad_collate(batch):
+    adapted_batch = []
+    for b in batch:
+        motion = b[0]
+        d = {
+            'inp': motion['alice_joints'],
+            'text': b[1]['task']
+        }
+        if 'valid_length' in b[1]:
+            d['lengths'] = b[1]['valid_length']
+
+        adapted_batch.append(d)
+
+    for b in adapted_batch:
+        # Change order
+        # from : [batch_size, frames, njoints, nfeats]
+        # to   ; [batch_size, njoints, nfeats, frames]
         b['inp'] = b['inp'].permute(1, 2, 0)
 
     return collate(adapted_batch)
