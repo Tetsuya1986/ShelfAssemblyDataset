@@ -143,7 +143,6 @@ class ShelfAssemblyDataset(data.Dataset):
                     except Exception as e:
                         print(f"Error loading {filepath}: {e}")
                         continue
-
         return data_list
 
     def load_annotation(self, text_dir, label_option, data_sel):
@@ -350,7 +349,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     "ass_dis": ann["ass_dis"],
                     "main_sub": ann["main_sub"],
                     "caption": f'{act["action_verb"]} {act["action_noun"]}',
-                    "caption_verb": act["action_verb"],
+                    "verb": act["action_verb"],
                 }
 
                 base_mdic = {
@@ -367,7 +366,7 @@ class ShelfAssemblyDataset(data.Dataset):
                         hours, minutes, seconds = end_str.split(":")
                         end_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
                         if start_sec_task <= start_sec and start_sec < end_sec_task:
-                            base_adic["caption"] = f'{base_adic["caption"]} to {task["task"]}'
+                            qbase_adic["caption"] = f'{base_adic["caption"]} to {task["task"]}'
                             # base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
                             break
 
@@ -528,7 +527,6 @@ class ShelfAssemblyDataset(data.Dataset):
         # Create paired samples
         paired_motions = []
         paired_annotations = []
-
         for pair_key in main_motions.keys():
             if pair_key in sub_motions:
                 # Create a combined motion dict with both Main (as conditioning) and Sub (as target)
@@ -544,6 +542,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     'no': main_annotations[pair_key]['no'],
                     'main_sub': 'Main_Sub_Pair',
                     'caption': main_annotations[pair_key].get('caption', 'paired_motion'),
+                    'verb': main_annotations[pair_key].get('verb', None),
                     'main_annotation': main_annotations[pair_key],
                     'sub_annotation': sub_annotations[pair_key],
                 }

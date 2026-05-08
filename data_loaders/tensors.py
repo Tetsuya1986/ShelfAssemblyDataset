@@ -40,6 +40,10 @@ def collate(batch):
         textbatch = [b['text'] for b in notnone_batches]
         cond['y'].update({'text': textbatch})
 
+    if 'verb' in notnone_batches[0]:
+        verbbatch = [b['verb'] for b in notnone_batches]
+        cond['y'].update({'verb': verbbatch})
+
     if 'tokens' in notnone_batches[0]:
         textbatch = [b['tokens'] for b in notnone_batches]
         cond['y'].update({'tokens': textbatch})
@@ -136,7 +140,8 @@ def shelf_assembly_collate(batch):
             d = {
                 'main_motion': main_inp,  # Conditioning motion (main person)
                 'inp': sub_inp,            # Target motion (sub person to predict)
-                'text': b[1]['caption']
+                'text': b[1]['caption'],
+                'verb': b[1]['verb']
             }
             if 'valid_length' in b[1]:
                 d['lengths'] = b[1]['valid_length']
@@ -169,7 +174,8 @@ def shelf_assembly_collate(batch):
 
             d = {
                 'inp': torch.cat([root_pos, global_orient, motion['body_pose'], motion['right_hand_pose'], motion['left_hand_pose']], dim=1).float(),
-                'text': b[1]['caption']
+                'text': b[1]['caption'],
+                'verb': b[1]['verb']
             }
             if 'valid_length' in b[1]:
                 d['lengths'] = b[1]['valid_length']

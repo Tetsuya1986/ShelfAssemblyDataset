@@ -304,7 +304,7 @@ def add_evaluation_options(parser):
 def get_cond_mode(args):
     if args.unconstrained:
         cond_mode = 'no_cond'
-    elif getattr(args, 'task', 'generation') == 'joint_motion_prediction':
+    elif getattr(args, 'task', 'generation') == 'collab_prediction':
         # For joint motion prediction, use both text (action) and motion conditioning
         cond_mode = 'text_motion'
     elif args.dataset in ['kit', 'humanml', 'shelf_assembly', 'core4d', 'comad']:
