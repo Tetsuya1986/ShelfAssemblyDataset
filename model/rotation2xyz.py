@@ -12,7 +12,7 @@ class Rotation2xyz:
     def __init__(self, device, dataset='amass'):
         self.device = device
         self.dataset = dataset
-        if dataset == 'shelf_assembly':
+        if dataset in ['shelf_assembly', 'core4d']:
             from utils.config import SMPLX_MODEL_PATH
             self.smpl_model = SMPL(model_path=SMPLX_MODEL_PATH, model_type='smplx', use_pca=False).eval().to(device)
         else:
@@ -34,7 +34,7 @@ class Rotation2xyz:
             raise NotImplementedError("This jointstype is not implemented.")
 
         if translation:
-            if self.dataset == 'shelf_assembly':
+            if self.dataset in ['shelf_assembly', 'core4d']:
                 x_translations = x[:, 0, :3]
                 x_rotations = x[:, 1:]
             else:
@@ -83,6 +83,19 @@ class Rotation2xyz:
             hand_kwargs = {
                 'left_hand_pose': left_hand_pose,
                 'right_hand_pose': right_hand_pose
+            }
+        elif self.dataset == 'core4d':
+            body_pose = rotations[:, :21]
+            right_hand_pose = rotations[:, 21]
+            left_hand_pose = rotations[:, 22]
+
+            N_masked = rotations.shape[0]
+            body_pose = geometry.matrix_to_axis_angle(body_pose).view(N_masked, -1)
+            right_hand_pose = geometry.matrix_to_axis_angle(right_hand_pose).view(N_masked, -1)
+            left_hand_pose = geometry.matrix_to_axis_angle(left_hand_pose).view(N_masked, -1)
+            global_orient = geometry.matrix_to_axis_angle(global_orient).view(N_masked, -1)
+
+            hand_kwargs = {
             }
         else:
             body_pose = rotations

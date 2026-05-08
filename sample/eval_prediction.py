@@ -530,7 +530,8 @@ def main(args=None):
             # Detect collaboration prediction task
             is_collab_task = hasattr(args, 'task') and args.task == 'collab_prediction'
             verb = model_kwargs['y'].get('verb', None) if 'y' in model_kwargs else None
-            verb = verb[0]
+            if verb:
+                verb = verb[0]
 
             # Extract Main motion for collaboration tasks
             main_motion = None
@@ -593,6 +594,9 @@ def main(args=None):
             # For Sub motion: extract prediction window from input_motion
             gt_max_len = int(lengths.max().item())
             gt_sub_pred_window = input_motion[..., history_len:gt_max_len] # [bs, nj, nfeats, slen]
+
+            if gt_sub_pred_window.shape[-1] == 0:
+                continue
             
             # Use model.rot2xyz to get the xyz joint positions
             rot2xyz_pose_rep = 'xyz' if model.data_rep in ['xyz', 'hml_vec'] else model.data_rep
@@ -662,7 +666,12 @@ def main(args=None):
                 # Extract exactly the 52 structural joints corresponding to the rotated inputs.
                 # SMPL-X output order: 0-21 Body, 22-24 Face, 25-39 Left Hand, 40-54 Right Hand, 55+ Face Contours.
                 # The 53 input features are: 1 trans + 52 rotations (22 body, 15 LH, 15 RH).
-                core_joints_indices = list(range(22)) + list(range(25, 55))
+                if args.dataset in ['shelf_assembly']:
+                    core_joints_indices = list(range(22)) + list(range(25, 55))
+                elif args.dataset in ['core4d']:
+                    core_joints_indices = list(range(22))
+                else:
+                    core_joints_indices = list(range(gt_future.shape[1]))
 
                 gt_future = gt_future[:, core_joints_indices, :]
                 pred_future = pred_future[:, :, core_joints_indices, :]

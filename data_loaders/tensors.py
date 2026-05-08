@@ -235,11 +235,10 @@ def comad_collate(batch):
         motion = b[0]
         d = {
             'inp': motion['alice_joints'],
-            'text': b[1]['task']
+            'text': b[1]['task'],
+            'verb': b[1]['verb'],
+            'length': b[1]['valid_length']
         }
-        if 'valid_length' in b[1]:
-            d['lengths'] = b[1]['valid_length']
-
         adapted_batch.append(d)
 
     for b in adapted_batch:

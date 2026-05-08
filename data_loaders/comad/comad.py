@@ -285,7 +285,8 @@ class CoMaDDataset(Dataset):
                             'clip_idx': clip_idx,
                             'person_id': 'Alice',
                             'valid_length': self.sequence_len,
-                            'dataset': 'CoMaD'
+                            'dataset': 'CoMaD',
+                            'verb': task
                         })
 
                         # Clip 2: Bob as primary (flipped version)
@@ -306,7 +307,8 @@ class CoMaDDataset(Dataset):
                             'clip_idx': clip_idx,
                             'person_id': 'Bob',
                             'valid_length': self.sequence_len,
-                            'dataset': 'CoMaD'
+                            'dataset': 'CoMaD',
+                            'verb': task
                         })
 
                         clip_idx += 1

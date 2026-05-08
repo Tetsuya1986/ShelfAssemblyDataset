@@ -38,7 +38,7 @@ class CORE4DDataset(Dataset):
     Extracts motion data and converts to 6D rotation representation.
     """
     def __init__(self, split='train', past_len=15, future_len=15, sample_rate=1,
-                 smplx_model_dir="", test_set="", datapath="./dataset/core4d_opt.txt", **kwargs):
+                 smplx_model_dir="", test_set="all", datapath="./dataset/core4d_opt.txt", **kwargs):
         """
         Args:
             split: 'train' or 'test'
@@ -88,8 +88,7 @@ class CORE4DDataset(Dataset):
                 sequence_names = test_sequence_names_seen_obj
             elif test_set == "unseen":
                 sequence_names = test_sequence_names_unseen_obj
-            else:
-                raise NotImplementedError
+
         else:
             raise Exception('split must be train or test.')
         self.seq_dirs = []
