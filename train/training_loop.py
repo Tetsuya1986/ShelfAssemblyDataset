@@ -181,7 +181,7 @@ class TrainLoop:
 
             tgt_wd = self.opt.param_groups[0]['weight_decay']
             print('target weight decay:', tgt_wd)
-            self.opt.load_state_dict(state_dict)
+            # self.opt.load_state_dict(state_dict)
             print('loaded weight decay (will be replaced):',
                   self.opt.param_groups[0]['weight_decay'])
             # preserve the weight decay parameter

@@ -137,6 +137,9 @@ class CoMaDDataset(Dataset):
 
         # Iterate through task directories
         for task in sorted(os.listdir(dataset_path)):
+            if task not in ['handover']:
+                continue
+
             task_path = os.path.join(dataset_path, task, 'HH')
             if not os.path.isdir(task_path):
                 continue

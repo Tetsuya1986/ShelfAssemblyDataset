@@ -350,6 +350,7 @@ class ShelfAssemblyDataset(data.Dataset):
                     "main_sub": ann["main_sub"],
                     "caption": f'{act["action_verb"]} {act["action_noun"]}',
                     "verb": act["action_verb"],
+                    "clip_start_frame": s_frame
                 }
 
                 base_mdic = {
@@ -366,7 +367,7 @@ class ShelfAssemblyDataset(data.Dataset):
                         hours, minutes, seconds = end_str.split(":")
                         end_sec_task = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
                         if start_sec_task <= start_sec and start_sec < end_sec_task:
-                            qbase_adic["caption"] = f'{base_adic["caption"]} to {task["task"]}'
+                            base_adic["caption"] = f'{base_adic["caption"]} to {task["task"]}'
                             # base_adic["caption"] = f'{act["action_verb"]} {act["action_noun"]} to {task["task"]}'
                             break
 

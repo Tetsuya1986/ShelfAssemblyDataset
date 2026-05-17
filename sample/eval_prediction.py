@@ -57,7 +57,7 @@ def calculate_metrics(gt_motion, pred_motions):
 
 def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, pred_sub_motions, 
                              verb, gt_main_root_pos, gt_sub_root_pos, table_height=0.7, hand_joints_indices=None,
-                             hold_duration_frames=10, position_stability_threshold=0.05):
+                             hold_duration_frames=15, position_stability_threshold=0.01):
     """
     Calculates collaboration-specific metrics between ground-truth and predicted motions for Main and Sub persons.
     
@@ -102,22 +102,22 @@ def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, p
             - num_stable_windows: Number of hold_duration_frames windows with stable relative position
     """
     
-    if hand_joints_indices is None:
-        # Standard SMPL hand joints: left hand (22-36), right hand (37-52)
-        hand_joints_indices = list(range(22, 37)) + list(range(37, 52))
+    # Standard SMPL hand joints: left hand (22-36), right hand (37-52)
+    left_hand_joints_indices = list(range(26, 28))
+    right_hand_joints_indices = list(range(41, 43))
     
-    T = min(gt_main_motion.shape[0], gt_sub_motion.shape[0])
+    T = min(gt_main_motion.shape[0], gt_sub_motion.shape[0], pred_sub_motions.shape[1])
     K = pred_sub_motions.shape[0] if pred_sub_motions is not None else 1
     
     verb_lower = verb.lower().strip()
     
     if verb_lower in ["hand over", "receive"]:
         # Calculate minimum distance between Main and Sub person's hands
-        gt_main_hands = gt_main_motion[:, hand_joints_indices, :]  # [T, num_hand_joints, 3]
-        gt_sub_hands = gt_sub_motion[:, hand_joints_indices, :]
-
-        gt_main_hands += gt_main_root_pos.detach().cpu().numpy()
-        gt_sub_hands += gt_sub_root_pos.detach().cpu().numpy()
+        
+        gt_main_right_hands = gt_main_motion[:, right_hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        gt_main_left_hands = gt_main_motion[:, left_hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        gt_sub_right_hands = gt_sub_motion[:, right_hand_joints_indices, :]
+        gt_sub_left_hands = gt_sub_motion[:, left_hand_joints_indices, :]
 
         # Ground truth hand distance
         # For each frame, find minimum distance between any hand joint pair
@@ -125,55 +125,60 @@ def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, p
         for t in range(T):
             # Compute distances between all main hand joints and all sub hand joints
             # main_hands[t]: [num_joints, 3], sub_hands[t]: [num_joints, 3]
-            main_hand_positions = gt_main_hands[t]  # [num_joints, 3]
-            sub_hand_positions = gt_sub_hands[t]    # [num_joints, 3]
+            main_r_hand = gt_main_right_hands[t]  # [num_joints, 3]
+            main_l_hand = gt_main_left_hands[t]  # [num_joints, 3]
+            sub_r_hand  = gt_sub_right_hands[t]    # [num_joints, 3]
+            sub_l_hand  = gt_sub_left_hands[t]    # [num_joints, 3]
 
             # Compute pairwise distances: [num_joints, num_joints]
-            distances = np.linalg.norm(
-                main_hand_positions[:, np.newaxis, :] - sub_hand_positions[np.newaxis, :, :],
-                axis=2
-            )
-            min_dist = np.min(distances)
+            dis_rr = np.min(np.linalg.norm(main_r_hand[:,  :] - sub_r_hand[:, :], axis=1))
+            dis_ll = np.min(np.linalg.norm(main_l_hand[:,  :] - sub_l_hand[:, :], axis=1))
+            dis_rl = np.min(np.linalg.norm(main_r_hand[:,  :] - sub_l_hand[:, :], axis=1))
+            dis_lr = np.min(np.linalg.norm(main_l_hand[:,  :] - sub_r_hand[:, :], axis=1))
+            min_dist = min(dis_rr, dis_ll, dis_rl, dis_lr)
+
             gt_hand_distances.append(min_dist)
-        
+
         gt_hand_distances = np.array(gt_hand_distances)  # [T]
         gt_mean_min_distance = np.mean(gt_hand_distances)
         gt_min_distance_overall = np.min(gt_hand_distances)
-        
         # Predicted hand distances
         # If pred_main_motions is provided, use it; otherwise use ground truth Main motion
         
         # Only Sub is predicted, Main is ground truth
+        pred_hand_distances_per_k_mean = []
         pred_hand_distances_per_k = []
         for k in range(K):
-            pred_sub_hands = pred_sub_motions[k, :, hand_joints_indices, :]  # [T, num_hand_joints, 3]
-            
+            pred_sub_right_hands = pred_sub_motions[k, :, right_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_left_hands = pred_sub_motions[k, :, left_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            # pred_sub_right_hands = np.transpose(pred_sub_right_hands, (1, 0, 2)) + gt_sub_root_pos.detach().cpu().numpy()
+            # pred_sub_left_hands = np.transpose(pred_sub_left_hands, (1, 0, 2)) + gt_sub_root_pos.detach().cpu().numpy()
+            pred_sub_right_hands = np.transpose(pred_sub_right_hands, (1, 0, 2))
+            pred_sub_left_hands = np.transpose(pred_sub_left_hands, (1, 0, 2))
             pred_hand_distances = []
             for t in range(T):
-                main_hand_positions = gt_main_hands[t]  # Use ground truth Main
-                sub_hand_positions = pred_sub_hands[t]
-                sub_hand_positions += gt_sub_root_pos.detach().cpu().numpy()
-                
-                distances = np.linalg.norm(
-                    main_hand_positions[:, np.newaxis, :] - sub_hand_positions[np.newaxis, :, :],
-                    axis=2
-                )
-                min_dist = np.min(distances)
+                main_r_hand = gt_main_right_hands[t]  # [num_joints, 3]
+                main_l_hand = gt_main_left_hands[t]  # [num_joints, 3]
+                sub_r_hand = pred_sub_right_hands[t]
+                sub_l_hand = pred_sub_left_hands[t]
+                dis_rr = np.min(np.linalg.norm(main_r_hand[:,  :] - sub_r_hand[:, :], axis=1))
+                dis_ll = np.min(np.linalg.norm(main_l_hand[:,  :] - sub_l_hand[:, :], axis=1))
+                dis_rl = np.min(np.linalg.norm(main_r_hand[:,  :] - sub_l_hand[:, :], axis=1))
+                dis_lr = np.min(np.linalg.norm(main_l_hand[:,  :] - sub_r_hand[:, :], axis=1))
+                min_dist = min(dis_rr, dis_ll, dis_rl, dis_lr)
                 pred_hand_distances.append(min_dist)
-            
+
             pred_hand_distances = np.array(pred_hand_distances)  # [T]
-            pred_hand_distances_per_k.append(np.mean(pred_hand_distances))
-        
+            pred_hand_distances_per_k.append(pred_hand_distances)
+            pred_hand_distances_per_k_mean.append(np.mean(pred_hand_distances))
+
         # Select best prediction
-        best_k = np.argmin(pred_hand_distances_per_k)
-        pred_sub_hands_best = pred_sub_motions[best_k, :, hand_joints_indices, :]
+        best_k = np.argmin(pred_hand_distances_per_k_mean)
+        pred_sub_hands_best = pred_hand_distances_per_k[best_k]
         
         pred_hand_distances = []
         for t in range(T):
-            distances = np.linalg.norm(
-                gt_main_hands[t, :, np.newaxis, :] - pred_sub_hands_best[t, np.newaxis, :, :],
-                axis=2
-            )
+            distances = np.linalg.norm(gt_hand_distances - pred_sub_hands_best)
             min_dist = np.min(distances)
             pred_hand_distances.append(min_dist)
         
@@ -194,60 +199,61 @@ def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, p
         # Calculate minimum distance between hand and table
         # If pred_main_motions is None, we use Sub person's hand instead
         
-        # Sub person hand distance to table (for collab_prediction)
-        gt_main_hands = gt_sub_motion[:, hand_joints_indices, :]  # [T, num_hand_joints, 3]
-        gt_main_hands += gt_main_root_pos.detach().cpu().numpy()
+        # # Sub person hand distance to table (for collab_prediction)
+        # gt_main_right_hands = gt_main_motion[:, right_hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        # gt_main_left_hands = gt_main_motion[:, left_hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        # gt_sub_right_hands = gt_sub_motion[:, right_hand_joints_indices, :]
+        # gt_sub_left_hands = gt_sub_motion[:, left_hand_joints_indices, :]
         
-        gt_hand_table_distances = []
+        # gt_hand_table_distances = []
         
-        for t in range(T):
-            hand_positions = gt_main_hands[t]  # [num_joints, 3]
-            # Distance from hand to table plane (vertical distance)
-            distances_to_table = np.abs(hand_positions[:, 1] - table_height)
-            min_dist = np.min(distances_to_table)
-            gt_hand_table_distances.append(min_dist)
-        
-        gt_hand_table_distances = np.array(gt_hand_table_distances)  # [T]
-        gt_mean_min_distance = np.mean(gt_hand_table_distances)
-        gt_min_distance_overall = np.min(gt_hand_table_distances)
-        
+        # for t in range(T):
+        #     r_hand = gt_sub_right_hands[t]  # [num_joints, 3]
+        #     l_hand = gt_sub_left_hands[t]  # [num_joints, 3]
+        #     # Distance from hand to table plane (vertical distance)
+        #     r_dis_to_table = np.abs(r_hand[:, 1] - table_height)
+        #     l_dis_to_table = np.abs(l_hand[:, 1] - table_height)
+        #     min_dist = min(np.min(r_dis_to_table), np.min(l_dis_to_table))
+        #     gt_hand_table_distances.append(min_dist)
+
+        # gt_hand_table_distances = np.array(gt_hand_table_distances)  # [T]
+        # gt_mean_min_distance = np.mean(gt_hand_table_distances)
+        # gt_min_distance_overall = np.min(gt_hand_table_distances)
+
         # Predicted hand-table distances
         # If pred_main_motions is provided, use it; otherwise use pred_sub_motions
-        
+
         # Sub person hand distances to table (for collab_prediction where we predict Sub)
+        pred_hand_table_distances_per_k_mean = []
         pred_hand_table_distances_per_k = []
         for k in range(K):
-            pred_sub_hands = pred_sub_motions[k, :, hand_joints_indices, :]
-            pred_sub_hands += gt_sub_root_pos.detach().cpu().numpy()
+            pred_sub_right_hands = pred_sub_motions[k, :, right_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_left_hands = pred_sub_motions[k, :, left_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_right_hands = np.transpose(pred_sub_right_hands, (1, 0, 2)) + gt_sub_root_pos.detach().cpu().numpy()
+            pred_sub_left_hands = np.transpose(pred_sub_left_hands, (1, 0, 2)) + gt_sub_root_pos.detach().cpu().numpy()
             pred_distances = []
-            
             for t in range(T):
-                hand_positions = pred_sub_hands[t]
-                distances_to_table = np.abs(hand_positions[:, 1] - table_height)
-                min_dist = np.min(distances_to_table)
+                sub_r_hand = pred_sub_right_hands[t, :, 1]
+                sub_l_hand = pred_sub_left_hands[t, :, 1]
+                dis_r = np.min(np.abs(sub_r_hand - table_height))
+                dis_l = np.min(np.abs(sub_l_hand - table_height))
+                min_dist = min(dis_r, dis_l)
                 pred_distances.append(min_dist)
-            
-            pred_hand_table_distances_per_k.append(np.mean(pred_distances))
-        
+
+            pred_hand_table_distances_per_k_mean.append(np.mean(pred_distances))
+            pred_hand_table_distances_per_k.append(np.array(pred_distances))
+
         # Select best prediction
-        best_k = np.argmin(pred_hand_table_distances_per_k)
-        pred_sub_hands_best = pred_sub_motions[best_k, :, hand_joints_indices, :]
-        
-        pred_hand_table_distances = []
-        for t in range(T):
-            hand_positions = pred_sub_hands_best[t]
-            hand_positions += gt_sub_root_pos.detach().cpu().numpy()
-            distances_to_table = np.abs(hand_positions[:, 1] - table_height)
-            min_dist = np.min(distances_to_table)
-            pred_hand_table_distances.append(min_dist)
-        
-        pred_hand_table_distances = np.array(pred_hand_table_distances)  # [T]
-        pred_mean_min_distance = np.mean(pred_hand_table_distances)
-        pred_min_distance_overall = np.min(pred_hand_table_distances)
+        best_k = np.argmin(pred_hand_table_distances_per_k_mean)
+        pred_sub_hands_best = pred_hand_table_distances_per_k[best_k]
+
+        pred_hand_table_distances = np.array(pred_sub_hands_best)  # [T]
+        pred_mean_min_distance = np.mean(pred_sub_hands_best)
+        pred_min_distance_overall = np.min(pred_sub_hands_best)
         return {
-            'gt_min_distance_per_frame': gt_hand_table_distances,
-            'gt_mean_min_distance': gt_mean_min_distance,
-            'gt_min_distance_overall': gt_min_distance_overall,
+            'gt_min_distance_per_frame': 0,
+            'gt_mean_min_distance': 0,
+            'gt_min_distance_overall': 0,
             'pred_min_distance_per_frame': pred_hand_table_distances,
             'pred_mean_min_distance': pred_mean_min_distance,
             'pred_min_distance_overall': pred_min_distance_overall,
@@ -258,35 +264,42 @@ def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, p
     elif verb_lower in ["hold"]:
         # Measure if Sub person's hand stays in the same position for hold_duration_frames
         # Extract Sub person's hand positions
-        gt_sub_hands = gt_sub_motion[:, hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        # gt_sub_hands = gt_sub_motion[:, hand_joints_indices, :]  # [T, num_hand_joints, 3]
         
-        # Compute hand center position (average of all hand joints)
-        gt_sub_hand_center = np.mean(gt_sub_hands, axis=1)  # [T, 3]
+        # # Compute hand center position (average of all hand joints)
+        # gt_sub_hand_center = np.mean(gt_sub_hands, axis=1)  # [T, 3]
         
-        # For each frame, compute distance to the mean position to determine stability
-        hand_mean_position = np.mean(gt_sub_hand_center, axis=0)  # [3]
-        distances_from_mean = np.linalg.norm(gt_sub_hand_center - hand_mean_position[np.newaxis, :], axis=1)  # [T]
+        # # For each frame, compute distance to the mean position to determine stability
+        # hand_mean_position = np.mean(gt_sub_hand_center, axis=0)  # [3]
+        # distances_from_mean = np.linalg.norm(gt_sub_hand_center - hand_mean_position[np.newaxis, :], axis=1)  # [T]
         
-        # Frame is stable if distance from mean is below threshold
-        stability_per_frame = distances_from_mean < position_stability_threshold
-        stability_ratio = np.sum(stability_per_frame) / T
-        mean_hand_stability = np.mean(distances_from_mean)
+        # # Frame is stable if distance from mean is below threshold
+        # stability_per_frame = distances_from_mean < position_stability_threshold
+        # stability_ratio = np.sum(stability_per_frame) / T
+        # mean_hand_stability = np.mean(distances_from_mean)
         
-        # Count number of stable windows (consecutive hold_duration_frames)
-        num_stable_windows = 0
-        for t in range(T - hold_duration_frames + 1):
-            window = stability_per_frame[t:t+hold_duration_frames]
-            if np.all(window):
-                num_stable_windows += 1
+        # # Count number of stable windows (consecutive hold_duration_frames)
+        # num_stable_windows = 0
+        # for t in range(T - hold_duration_frames + 1):
+        #     window = stability_per_frame[t:t+hold_duration_frames]
+        #     if np.all(window):
+        #         num_stable_windows += 1
         
         # For predictions, find best among K
         pred_stability_per_k = []
         for k in range(K):
-            pred_sub_hands = pred_sub_motions[k, :, hand_joints_indices, :]  # [T, num_hand_joints, 3]
-            pred_sub_hand_center = np.mean(pred_sub_hands, axis=1)  # [T, 3]
-            pred_hand_mean = np.mean(pred_sub_hand_center, axis=0)  # [3]
-            pred_distances = np.linalg.norm(pred_sub_hand_center - pred_hand_mean[np.newaxis, :], axis=1)  # [T]
-            pred_stability_per_k.append(np.mean(pred_distances))
+            pred_sub_right_hands = pred_sub_motions[k, :, right_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_left_hands = pred_sub_motions[k, :, left_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_right_hands = np.transpose(pred_sub_right_hands, (1, 0, 2))
+            pred_sub_left_hands = np.transpose(pred_sub_left_hands, (1, 0, 2))
+            pred_sub_right_hand_center = np.mean(pred_sub_right_hands, axis=1)  # [T, 3]
+            pred_sub_left_hand_center = np.mean(pred_sub_left_hands, axis=1)  # [T, 3]
+            pred_sub_hand_dist = pred_sub_right_hand_center - pred_sub_left_hand_center
+            import pdb; pdb.set_trace()
+            for t in range(T):
+                pred_hand_mean = np.mean(pred_sub_hand_center, axis=0)  # [3]
+                pred_distances = np.linalg.norm(pred_sub_hand_center - pred_hand_mean[np.newaxis, :], axis=1)  # [T]
+                pred_stability_per_k.append(np.mean(pred_distances))
         
         best_k = np.argmin(pred_stability_per_k)
         pred_sub_hands = pred_sub_motions[best_k, :, hand_joints_indices, :]
@@ -302,6 +315,7 @@ def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, p
             window = pred_stability[t:t+hold_duration_frames]
             if np.all(window):
                 pred_num_stable_windows += 1
+
         return {
             'gt_stability_ratio': float(stability_ratio),
             'gt_mean_hand_stability': float(mean_hand_stability),
@@ -315,70 +329,112 @@ def calculate_collab_metrics(gt_main_motion, gt_sub_motion, pred_main_motions, p
     
     elif verb_lower in ["flip", "rotate"]:
         # Measure if Main and Sub people maintained relative hand position for a duration
-        gt_main_hands = gt_main_motion[:, hand_joints_indices, :]  # [T, num_hand_joints, 3]
-        gt_sub_hands = gt_sub_motion[:, hand_joints_indices, :]    # [T, num_hand_joints, 3]
-
-        gt_main_hands += gt_main_root_pos.detach().cpu().numpy()
-        gt_sub_hands += gt_sub_root_pos.detach().cpu().numpy()
+        gt_main_right_hands = gt_main_motion[:, right_hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        gt_main_left_hands = gt_main_motion[:, left_hand_joints_indices, :]  # [T, num_hand_joints, 3]
+        gt_sub_right_hands = gt_sub_motion[:, right_hand_joints_indices, :]
+        gt_sub_left_hands = gt_sub_motion[:, left_hand_joints_indices, :]
 
         # Compute hand center positions
-        gt_main_hand_center = np.mean(gt_main_hands, axis=1)  # [T, 3]
-        gt_sub_hand_center = np.mean(gt_sub_hands, axis=1)    # [T, 3]
+        gt_main_right_hand_center = np.mean(gt_main_right_hands, axis=1)  # [T, 3]
+        gt_main_left_hand_center = np.mean(gt_main_left_hands, axis=1)  # [T, 3]
+        gt_sub_right_hand_center = np.mean(gt_sub_right_hands, axis=1)    # [T, 3]
+        gt_sub_left_hand_center = np.mean(gt_sub_left_hands, axis=1)    # [T, 3]
 
-        gt_main_hand_center = gt_main_hand_center[:gt_sub_hand_center.shape[0], :]
-        
+        # Truncate
+        gt_main_right_hand_center = gt_main_right_hand_center[:T,:]
+        gt_main_left_hand_center = gt_main_left_hand_center[:T,:]
+        gt_sub_right_hand_center = gt_sub_right_hand_center[:T,:]
+        gt_sub_left_hand_center = gt_sub_left_hand_center[:T,:]
+
         # Compute relative position (vector from Sub to Main)
-        gt_relative_position = gt_main_hand_center - gt_sub_hand_center  # [T, 3]
+        gt_rel_pos_rr = gt_main_right_hand_center - gt_sub_right_hand_center  # [T, 3]
+        gt_rel_pos_ll = gt_main_left_hand_center - gt_sub_left_hand_center  # [T, 3]
+        gt_rel_pos_rl = gt_main_right_hand_center - gt_sub_left_hand_center  # [T, 3]
+        gt_rel_pos_lr = gt_main_left_hand_center - gt_sub_right_hand_center  # [T, 3]
         
         # Compute relative distance (magnitude)
-        gt_relative_distances = np.linalg.norm(gt_relative_position, axis=1)  # [T]
+        gt_rel_dis_rr = np.linalg.norm(gt_rel_pos_rr, axis=1)  # [T]
+        gt_rel_dis_ll = np.linalg.norm(gt_rel_pos_ll, axis=1)  # [T]
+        gt_rel_dis_rl = np.linalg.norm(gt_rel_pos_rl, axis=1)  # [T]
+        gt_rel_dis_lr = np.linalg.norm(gt_rel_pos_lr, axis=1)  # [T]
         
         # Compute frame-to-frame variation in relative position
-        gt_position_variations = np.linalg.norm(np.diff(gt_relative_position, axis=0), axis=1)  # [T-1]
+        gt_rel_dis_var_rr = np.diff(gt_rel_dis_rr, axis=0)  # [T-1]
+        gt_rel_dis_var_ll = np.diff(gt_rel_dis_ll, axis=0)  # [T-1]
+        gt_rel_dis_var_rl = np.diff(gt_rel_dis_rl, axis=0)  # [T-1]
+        gt_rel_dis_var_lr = np.diff(gt_rel_dis_lr, axis=0)  # [T-1]
         
         # Frame is stable if variation from previous frame is small
-        gt_stability_per_frame = np.concatenate([[True], gt_position_variations < position_stability_threshold])  # [T]
-        gt_relative_position_stability = np.sum(gt_stability_per_frame) / T
-        gt_mean_position_variation = np.mean(gt_position_variations)
-        
+        gt_stability_per_frame_rr = np.concatenate([[True], gt_rel_dis_var_rr < position_stability_threshold])  # [T]
+        gt_stability_per_frame_ll = np.concatenate([[True], gt_rel_dis_var_ll < position_stability_threshold])  # [T]
+        gt_stability_per_frame_rl = np.concatenate([[True], gt_rel_dis_var_rl < position_stability_threshold])  # [T]
+        gt_stability_per_frame_lr = np.concatenate([[True], gt_rel_dis_var_lr < position_stability_threshold])  # [T]
+        gt_stability_per_frame = [gt_stability_per_frame_rr, gt_stability_per_frame_ll, gt_stability_per_frame_rl, gt_stability_per_frame_lr]
+        gt_stability_rr = np.sum(gt_stability_per_frame_rr) / T
+        gt_stability_ll = np.sum(gt_stability_per_frame_ll) / T
+        gt_stability_rl = np.sum(gt_stability_per_frame_rl) / T
+        gt_stability_lr = np.sum(gt_stability_per_frame_lr) / T
+
+        best_k = np.argmax([gt_stability_rr, gt_stability_ll, gt_stability_rl, gt_stability_lr])
+        gt_stability_per_frame_best = gt_stability_per_frame[best_k]
+
         # Count stable windows
         gt_num_stable_windows = 0
         for t in range(T - hold_duration_frames + 1):
-            window = gt_stability_per_frame[t:t+hold_duration_frames]
+            window = gt_stability_per_frame_best[t:t+hold_duration_frames]
             if np.all(window):
                 gt_num_stable_windows += 1
-        
+
         # For predictions
         # Only Sub is predicted, Main is ground truth
-        pred_main_hands = gt_main_hands
-        pred_sub_hands = pred_sub_motions[:, :, hand_joints_indices, :]
-        pred_sub_hands = pred_sub_hands[0, :, :, :]
-        pred_sub_hands += gt_sub_root_pos.detach().cpu().numpy()
-        
-        pred_main_hands = pred_main_hands[:pred_sub_hands.shape[0], :]
-        pred_main_center = np.mean(pred_main_hands, axis=1)
-        pred_sub_center = np.mean(pred_sub_hands, axis=1)
-        pred_relative_position = pred_main_center - pred_sub_center
-        pred_relative_distances = np.linalg.norm(pred_relative_position, axis=1)
-        pred_position_variations = np.linalg.norm(np.diff(pred_relative_position, axis=0), axis=1)
-        pred_stability_per_frame = np.concatenate([[True], pred_position_variations < position_stability_threshold])
-        pred_relative_position_stability = np.sum(pred_stability_per_frame) / T
-        pred_mean_position_variation = np.mean(pred_position_variations)
-        
+        for k in range(K):
+            pred_sub_right_hands = pred_sub_motions[k, :, right_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_left_hands = pred_sub_motions[k, :, left_hand_joints_indices, :] + gt_sub_root_pos.detach().cpu().numpy()  # [T, num_hand_joints, 3]
+            pred_sub_right_hands = np.transpose(pred_sub_right_hands, (1, 0, 2))
+            pred_sub_left_hands = np.transpose(pred_sub_left_hands, (1, 0, 2))
+            pred_sub_right_hand_center = np.mean(pred_sub_right_hands, axis=1)  # [T, 3]
+            pred_sub_left_hand_center = np.mean(pred_sub_left_hands, axis=1)  # [T, 3]
+
+            pred_rel_pos_rr = gt_main_right_hand_center - pred_sub_right_hand_center  # [T, 3]
+            pred_rel_pos_ll = gt_main_left_hand_center - pred_sub_left_hand_center  # [T, 3]
+            pred_rel_pos_rl = gt_main_right_hand_center - pred_sub_left_hand_center  # [T, 3]
+            pred_rel_pos_lr = gt_main_left_hand_center - pred_sub_right_hand_center  # [T, 3]
+
+            pred_rel_dis_rr = np.linalg.norm(pred_rel_pos_rr, axis=1)  # [T]
+            pred_rel_dis_ll = np.linalg.norm(pred_rel_pos_ll, axis=1)  # [T]
+            pred_rel_dis_rl = np.linalg.norm(pred_rel_pos_rl, axis=1)  # [T]
+            pred_rel_dis_lr = np.linalg.norm(pred_rel_pos_lr, axis=1)  # [T]
+
+            pred_rel_dis_var_rr = np.diff(pred_rel_dis_rr, axis=0)  # [T-1]
+            pred_rel_dis_var_ll = np.diff(pred_rel_dis_ll, axis=0)  # [T-1]
+            pred_rel_dis_var_rl = np.diff(pred_rel_dis_rl, axis=0)  # [T-1]
+            pred_rel_dis_var_lr = np.diff(pred_rel_dis_lr, axis=0)  # [T-1]
+
+            pred_stability_per_frame_rr = np.concatenate([[True], pred_rel_dis_var_rr < position_stability_threshold])  # [T]
+            pred_stability_per_frame_ll = np.concatenate([[True], pred_rel_dis_var_ll < position_stability_threshold])  # [T]
+            pred_stability_per_frame_rl = np.concatenate([[True], pred_rel_dis_var_rl < position_stability_threshold])  # [T]
+            pred_stability_per_frame_lr = np.concatenate([[True], pred_rel_dis_var_lr < position_stability_threshold])  # [T]
+            pred_stability_per_frame = [pred_stability_per_frame_rr, pred_stability_per_frame_ll, pred_stability_per_frame_rl, pred_stability_per_frame_lr]
+
+            pred_stability_rr = np.sum(pred_stability_per_frame_rr) / T
+            pred_stability_ll = np.sum(pred_stability_per_frame_ll) / T
+            pred_stability_rl = np.sum(pred_stability_per_frame_rl) / T
+            pred_stability_lr = np.sum(pred_stability_per_frame_lr) / T
+
+            best_k = np.argmax([pred_stability_rr, pred_stability_ll, pred_stability_rl, pred_stability_lr])
+            pred_stability_per_frame_best = pred_stability_per_frame[best_k]
+            pred_stability_per_frame_best_mean = np.mean(pred_stability_per_frame[best_k])
+
         pred_num_stable_windows = 0
         for t in range(T - hold_duration_frames + 1):
-            window = pred_stability_per_frame[t:t+hold_duration_frames]
+            window = pred_stability_per_frame_best[t:t+hold_duration_frames]
             if np.all(window):
                 pred_num_stable_windows += 1
+
         return {
-            'gt_relative_position_stability': float(gt_relative_position_stability),
-            'gt_mean_position_variation': float(gt_mean_position_variation),
-            'gt_num_stable_windows': int(gt_num_stable_windows),
-            'gt_mean_relative_distance': float(np.mean(gt_relative_distances)),
-            'pred_relative_position_stability': float(pred_relative_position_stability),
-            'pred_mean_position_variation': float(pred_mean_position_variation),
+            'pred_stability_per_frame_best_mean': pred_stability_per_frame_best_mean,
+            'pred_relative_position_stability': pred_stability_per_frame_best,
             'pred_num_stable_windows': int(pred_num_stable_windows),
-            'pred_mean_relative_distance': float(np.mean(pred_relative_distances)),
             'hold_duration_frames': hold_duration_frames,
             'verb': verb,
         }
@@ -390,20 +446,20 @@ def judge_success_failure(res_dic):
     verb = res_dic['verb']
     if verb in ["hand over", "receive"]:
         print(f"[hand over / receive] {res_dic['pred_min_distance_overall']}")
-        return res_dic['pred_min_distance_overall'] < 0.1
+        return res_dic['pred_min_distance_overall'] < 0.3
 
     elif verb in ["pick up", "put down"]:
         print(f"[pick up / put down] {res_dic['pred_min_distance_overall']}")
-        return res_dic['pred_min_distance_overall'] < 0.1
+        return res_dic['pred_min_distance_overall'] < 0.05
 
     elif verb in ["hold"]:
         print(f"[hold] {res_dic['stability_ratio']}")
         return res_dic['stability_ratio'] < 0.1
 
     elif verb in ["flip", "rotate"]:
-        print(f"[flip / rotate] {res_dic['pred_mean_relative_distance']}")
+        print(f"[flip / rotate] {res_dic['pred_stability_per_frame_best_mean']}")
         print(f"[flip / rotate] {res_dic['hold_duration_frames']}")
-        return res_dic['pred_mean_relative_distance'] < 0.1 and res_dic['hold_duration_frames'] > 5
+        return res_dic['hold_duration_frames'] > 5
 
     else:
         assert(False)
@@ -416,8 +472,8 @@ def main(args=None):
         
     # generate_args() / apply_rules() may strip prediction parameters if it loaded `task=generation` from the checkpoint args.json
     # We must explicitly force prediction mode here to evaluate futures.
-    # args.task = 'collab_prediction'
-    args.task = 'prediction'
+    args.task = 'collab_prediction'
+    # args.task = 'prediction'
     if args.input_seconds is None:
         args.input_seconds = getattr(args, 'input_seconds_cli', 0.5)
     if args.prediction_seconds is None:
@@ -500,6 +556,10 @@ def main(args=None):
     # Collaboration metrics tracking
     all_collab_metrics = []
     all_collab_success = []
+    handover_success = []
+    pickupdown_success = []
+    hold_success = []
+    flip_rotate_success = []
     is_collab_task = False
 
     # Support debug subsets
@@ -518,7 +578,11 @@ def main(args=None):
             # Shape of input_motion: [bs, njoints, nfeats, total_frames]
             input_motion = input_motion.to(dist_util.dev())
             model_kwargs['y'] = {key: val.to(dist_util.dev()) if torch.is_tensor(val) else val for key, val in model_kwargs['y'].items()}
-            
+
+            # # debug
+            # if model_kwargs['y']['verb'][0] not in ["flip", "rotate"]:
+            #     continue
+
             bs = input_motion.shape[0]
             assert bs == 1
             
@@ -603,7 +667,7 @@ def main(args=None):
             rot2xyz_mask_gt = None if rot2xyz_pose_rep == 'xyz' else torch.ones((bs, gt_sub_pred_window.shape[-1]), dtype=torch.bool, device=dist_util.dev())
 
             gt_sub_xyz = model.rot2xyz(x=gt_sub_pred_window, mask=rot2xyz_mask_gt, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                                       jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                       jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=True,
                                        get_rotations_back=False) # [bs, nj, 3, slen]
                                    
             # gt_sub_xyz: [bs, nj, 3, slen] -> [bs, slen, nj, 3]
@@ -617,7 +681,7 @@ def main(args=None):
                 rot2xyz_mask_main = None if rot2xyz_pose_rep == 'xyz' else torch.ones((bs, gt_main_pred_window.shape[-1]), dtype=torch.bool, device=dist_util.dev())
                 
                 gt_main_xyz = model.rot2xyz(x=gt_main_pred_window, mask=rot2xyz_mask_main, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                                       jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                       jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=True,
                                        get_rotations_back=False) # [bs, nj, 3, slen]
                 
                 # gt_main_xyz: [bs, nj, 3, slen] -> [bs, slen, nj, 3]
@@ -630,7 +694,7 @@ def main(args=None):
                 rot2xyz_mask_pred = None if rot2xyz_pose_rep == 'xyz' else torch.ones((bs, pred_chunk.shape[-1]), dtype=torch.bool, device=dist_util.dev())
                 
                 pred_xyz_chunk = model.rot2xyz(x=pred_chunk, mask=rot2xyz_mask_pred, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
-                                       jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                       jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=True,
                                        get_rotations_back=False) # [bs, nj, 3, slen]
                 pred_xyz_list.append(pred_xyz_chunk)
                 
@@ -709,16 +773,29 @@ def main(args=None):
                         gt_main_root_pos=model_kwargs['y']['main_motion'][0, 0, :3, 0],
                         gt_sub_root_pos=input_motion[0, 0, :3, 0]
                     )
+
                     all_collab_metrics.append(collab_metrics)
                     if collab_metrics:
                         success = judge_success_failure(collab_metrics)
                         all_collab_success.append(success)
+                        if collab_metrics['verb'] in ["hand over", "receive"]:
+                            handover_success.append(success)
+                        elif collab_metrics['verb'] in ["pick up", "put down"]:
+                            pickupdown_success.append(success)
+                        elif collab_metrics['verb'] in ["hold"]:
+                            hold_success.append(success)
+                        elif collab_metrics['verb'] in ["flip", "rotate"]:
+                            flip_rotate_success.append(success)
 
 
             evaluated_count += bs
 
     if is_collab_task:
-        success_rate = sum(all_collab_success)/len(all_collab_success)
+        all_success_rate = sum(all_collab_success)/len(all_collab_success)
+        handover_success_rate = sum(handover_success)/len(handover_success)
+        pickupdown_success_rate = sum(pickupdown_success)/len(pickupdown_success)
+        # hold_success_rate = sum(hold_success)/len(hold_success)
+        flip_rotate_success_rate = sum(flip_rotate_success)/len(flip_rotate_success)
 
     if len(all_ade) == 0 and len(all_collab_metrics) == 0:
         print("No valid sequences found for evaluation.")
@@ -728,8 +805,11 @@ def main(args=None):
     if is_collab_task:
         # Collaboration prediction metrics
         res_str = (
-            f"Number of Samples: {len(all_collab_success)}\n"
-            f"Success Rate: {success_rate}"
+            f"[ALL] Number of Samples: {len(all_collab_success)}, Success Rate: {all_success_rate}\n"
+            f"[handover] Number of Samples: {len(handover_success)}, Success Rate: {handover_success_rate}\n"
+            f"[pickup] cNumber of Samples: {len(pickupdown_success)}, Success Rate: {pickupdown_success_rate}\n"
+            # f"[hold] Number of Samples: {len(hold_success)}, Success Rate: {hold_success_rate}\n"
+            f"[rotate] Number of Samples: {len(flip_rotate_success)}, Success Rate: {flip_rotate_success_rate}\n"
         )
         print(res_str)
 

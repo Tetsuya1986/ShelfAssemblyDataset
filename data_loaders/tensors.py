@@ -235,7 +235,7 @@ def comad_collate(batch):
         motion = b[0]
         d = {
             'inp': motion['alice_joints'],
-            'text': b[1]['task'],
+            'text': 'hand over pole', #b[1]['task'],
             'verb': b[1]['verb'],
             'length': b[1]['valid_length']
         }
