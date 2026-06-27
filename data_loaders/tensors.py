@@ -124,6 +124,8 @@ def shelf_assembly_collate(batch):
             else:
                 root_pos = torch.zeros((ee_pos.shape[0], 3)).to(ee_pos.device)
 
+            ee_pos_rel = ee_pos - root_pos
+
             if 'global_orient' in b[0]:
                 global_orient = b[0]['global_orient']  # (T, 4)
             else:
@@ -133,8 +135,9 @@ def shelf_assembly_collate(batch):
             # Joint 0: [root_pos (3) + global_orient (4)]
             # Joint 1: [EE_pos (3) + EE_rot (4)]
             joint_0 = torch.cat([root_pos, global_orient], dim=1).unsqueeze(1)  # (T, 1, 7)
-            joint_1 = torch.cat([ee_pos, ee_rot], dim=1).unsqueeze(1)  # (T, 1, 7)
-            inp = torch.cat([joint_0, joint_1], dim=1)  # (T, 2, 7)
+            joint_1 = torch.cat([ee_pos_rel, ee_rot], dim=1).unsqueeze(1)  # (T, 1, 7)
+            # inp = torch.cat([joint_0, joint_1], dim=1)  # (T, 2, 7)
+            inp = ee_pos_rel.unsqueeze(1)
 
             d = {
                 'inp': inp.float(),

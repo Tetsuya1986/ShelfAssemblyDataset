@@ -501,8 +501,11 @@ class ShelfAssemblyDataset(data.Dataset):
                                 if 'timestamps' in ro:
                                     timestamps = ro['timestamps']
                                     # Find frames within the time window
-                                    time_mask = (timestamps >= start_time) & (timestamps <= end_time)
+                                    time_mask = (timestamps >= start_time) & (timestamps < end_time)
                                     valid_indices = np.where(time_mask)[0]
+
+                                    if len(valid_indices) > window_size_frames:
+                                        valid_indices = valid_indices[:window_size_frames]
 
                                     if len(valid_indices) > 0:
                                         # Extract data for these indices

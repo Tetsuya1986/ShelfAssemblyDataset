@@ -102,8 +102,8 @@ def get_model_args(args, data):
         if is_robot_data:
             # Robot EE trajectory: root_pos(3) + global_orient(4) + EE_pos(3) + EE_rot(4) = 14 features
             data_rep = "xyz"
-            njoints = 2  # root_arm (3+4=7 features) and EE (3+4=7 features)
-            nfeats = 7
+            njoints = 1  # root_arm (3+4=7 features) and EE (3+4=7 features)
+            nfeats = 3
         else:
             # Human motion data
             data_rep = "rot6d"
@@ -126,7 +126,7 @@ def get_model_args(args, data):
         "nfeats": nfeats,
         "num_actions": num_actions,
         "translation": True,
-        "pose_rep": "rot6d",
+        "pose_rep": data_rep,
         "glob": True,
         "glob_rot": True,
         "latent_dim": args.latent_dim,
