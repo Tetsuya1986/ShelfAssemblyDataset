@@ -262,6 +262,9 @@ def main(args=None):
                 # gt_xyz_np is [bs, slen, nj, 3], but it already sliced off history_len
                 gt_future = gt_xyz_np[i, :pred_future_len, :, :] # [T, nj, 3]
 
+                if gt_future.shape[1] == 0:
+                    gt_future = np.expand_dims(gt_future, 1)
+
                 # If autoregressive included prefix, then prediction array starts at 0 with history
                 if args.autoregressive_include_prefix:
                     pred_future = pred_xyz_np[i, :, history_len:history_len + pred_future_len, :, :]
@@ -277,7 +280,7 @@ def main(args=None):
                 # SMPL-X output order: 0-21 Body, 22-24 Face, 25-39 Left Hand, 40-54 Right Hand, 55+ Face Contours.
                 # The 53 input features are: 1 trans + 52 rotations (22 body, 15 LH, 15 RH).
                 if args.data_sel == "HR-predictR":
-                    core_joints_indices = list(range(1))
+                    core_joints_indices = 0
                 else:
                     core_joints_indices = list(range(22)) + list(range(25, 55))
 
