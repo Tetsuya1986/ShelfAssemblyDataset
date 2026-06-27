@@ -24,6 +24,7 @@ def calculate_metrics(gt_motion, pred_motions):
 
     # 1. ADE@K: Average Displacement Error (Root Trajectory)
     # ADE = min_{k} (1/T * \sum_{t=1}^T ||p_{k,t,0} - \hat{p}_{t,0}||_2)
+
     ade_l2_dist = np.linalg.norm(pred_motions[:, :, 0, :] - gt_motion[None, :, 0, :], axis=-1)  # [K, T]
     ade_per_k = np.mean(ade_l2_dist, axis=1)  # [K]
     ade = np.min(ade_per_k)
@@ -285,6 +286,7 @@ def main(args=None):
                     core_joints_indices = list(range(22)) + list(range(25, 55))
 
                 gt_future = gt_future[:, core_joints_indices, :]
+                pred_future = np.expand_dims(pred_future, 2)
                 pred_future = pred_future[:, :, core_joints_indices, :]
 
                 ade, fde, mpjpe, apd = calculate_metrics(gt_future, pred_future)
