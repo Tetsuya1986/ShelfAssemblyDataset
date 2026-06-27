@@ -529,6 +529,7 @@ def main(args=None):
             
             # Detect collaboration prediction task
             is_collab_task = hasattr(args, 'task') and args.task == 'collab_prediction'
+            is_collab_task = True
             verb = model_kwargs['y'].get('verb', None) if 'y' in model_kwargs else None
             verb = verb[0]
 
