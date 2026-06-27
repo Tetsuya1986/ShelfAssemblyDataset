@@ -532,6 +532,12 @@ def main(args=None):
             verb = model_kwargs['y'].get('verb', None) if 'y' in model_kwargs else None
             verb = verb[0]
 
+            verb_lower = verb.lower().strip()
+            # if verb_lower not in ["hand over", "receive"]:
+            # if verb_lower not in ["pick up", "put down"]:
+            # if verb_lower not in ["flip", "rotate"]:
+            #     continue
+
             # Extract Main motion for collaboration tasks
             main_motion = None
             if is_collab_task and 'main_motion' in model_kwargs['y']:
@@ -692,6 +698,8 @@ def main(args=None):
                     # For predictions, we only predict Sub motion, not Main
                     # Main motion ground truth is used as context
                     # Predictions are for Sub person motion
+
+
                     collab_metrics = calculate_collab_metrics(
                         gt_main_motion=gt_main_future,
                         gt_sub_motion=gt_future,
