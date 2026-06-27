@@ -23,7 +23,10 @@ class Rotation2xyz:
                  glob_rot=None, get_rotations_back=False, **kwargs):
         if pose_rep == "xyz":
             if self.dataset == 'shelf_assembly':
-                return x[:, 1:, :3, :]
+                if x.shape[1] == 1:
+                    return x[:, :, :3, :]  # for robot data
+                else:
+                    return x[:, 1:, :3, :]
             else:
                 return x
 
