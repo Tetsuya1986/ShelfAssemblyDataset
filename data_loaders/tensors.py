@@ -125,6 +125,7 @@ def shelf_assembly_collate(batch):
                 root_pos = torch.zeros((ee_pos.shape[0], 3)).to(ee_pos.device)
 
             ee_pos_rel = ee_pos - root_pos
+            ee_pos_rel = ee_pos_rel - ee_pos_rel[0, ...]
 
             if 'global_orient' in b[0]:
                 global_orient = b[0]['global_orient']  # (T, 4)
