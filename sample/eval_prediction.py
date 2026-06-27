@@ -416,8 +416,7 @@ def main(args=None):
         
     # generate_args() / apply_rules() may strip prediction parameters if it loaded `task=generation` from the checkpoint args.json
     # We must explicitly force prediction mode here to evaluate futures.
-    # args.task = 'collab_prediction'
-    args.task = 'prediction'
+    args.task = 'collab_prediction'
     if args.input_seconds is None:
         args.input_seconds = getattr(args, 'input_seconds_cli', 0.5)
     if args.prediction_seconds is None:
@@ -608,6 +607,7 @@ def main(args=None):
             
             # For Main motion (collaboration tasks only)
             gt_main_xyz_np = None
+
             if is_collab_task and main_motion is not None:
                 # Extract Main motion prediction window
                 gt_main_pred_window = main_motion[..., history_len:gt_max_len]  # [bs, nj, nfeats, slen]
@@ -702,6 +702,7 @@ def main(args=None):
                         gt_sub_root_pos=input_motion[0, 0, :3, 0]
                     )
                     all_collab_metrics.append(collab_metrics)
+
                     if collab_metrics:
                         success = judge_success_failure(collab_metrics)
                         all_collab_success.append(success)
