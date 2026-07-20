@@ -6,6 +6,7 @@ numpy array. This can be used to produce samples for FID evaluation.
 from utils.fixseed import fixseed
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import os
 import numpy as np
 import torch
@@ -19,7 +20,116 @@ import data_loaders.humanml.utils.paramUtil as paramUtil
 from data_loaders.humanml.utils.plot_script import plot_3d_motion
 import shutil
 from data_loaders.tensors import collate
-from moviepy.editor import clips_array
+from moviepy.editor import clips_array, VideoClip
+from moviepy.video.io.bindings import mplfig_to_npimage
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+
+def plot_collab_3d_motion(save_path, kinematic_tree, main_joints, sub_joints, title, dataset, figsize=(6, 3), fps=120, radius=3,
+                          vis_mode='default', gt_frames=[]):
+    title = str(title)
+    title = '\n'.join(title.split('\n'))
+
+    def init(ax):
+        ax.set_xlim3d([-radius / 2, radius / 2])
+        ax.set_ylim3d([0, radius])
+        ax.set_zlim3d([-radius / 3., radius * 2 / 3.])
+        ax.grid(b=False)
+
+    def plot_xzPlane(ax, minx, maxx, miny, minz, maxz):
+        verts = [
+            [minx, miny, minz],
+            [minx, miny, maxz],
+            [maxx, miny, maxz],
+            [maxx, miny, minz]
+        ]
+        xz_plane = Poly3DCollection([verts])
+        xz_plane.set_facecolor((0.5, 0.5, 0.5, 0.5))
+        ax.add_collection3d(xz_plane)
+
+    def prepare_motion_data(joints):
+        data = joints.copy().reshape(len(joints), -1, 3)
+        if dataset == 'kit':
+            data *= 0.003
+        elif dataset == 'humanml':
+            data *= 1.3
+        elif dataset == 'shelf_assembly':
+            data *= 1.0
+        elif dataset in ['humanact12', 'uestc']:
+            data *= -1.5
+        return data
+
+    main_data = prepare_motion_data(main_joints)
+    sub_data = prepare_motion_data(sub_joints)
+
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection='3d')
+    plt.tight_layout()
+    init(ax)
+
+    main_mins = main_data.min(axis=0).min(axis=0)
+    main_maxs = main_data.max(axis=0).max(axis=0)
+    sub_mins = sub_data.min(axis=0).min(axis=0)
+    sub_maxs = sub_data.max(axis=0).max(axis=0)
+    shared_mins = np.minimum(main_mins, sub_mins)
+    shared_maxs = np.maximum(main_maxs, sub_maxs)
+
+    colors_blue = ["#4D84AA", "#5B9965", "#61CEB9", "#34C1E2", "#80B79A"]
+    colors_orange = ["#DD5A37", "#D69E00", "#B75A39", "#FF6D00", "#DDB50E"]
+    colors = colors_orange
+    if vis_mode == 'upper_body':
+        colors[0] = colors_blue[0]
+        colors[1] = colors_blue[1]
+    elif vis_mode == 'gt':
+        colors = colors_blue
+
+    main_height_offset = main_mins[1]
+    sub_height_offset = sub_mins[1]
+    main_data[:, :, 1] -= main_height_offset
+    sub_data[:, :, 1] -= sub_height_offset
+    main_trajec = main_data[:, 0, [0, 2]]
+    sub_trajec = sub_data[:, 0, [0, 2]]
+    # main_data[..., 0] -= main_data[:, 0:1, 0]   # delete offset adjusting
+    # main_data[..., 2] -= main_data[:, 0:1, 2]   # delete offset adjusting
+    # sub_data[..., 0] -= sub_data[:, 0:1, 0]   # delete offset adjusting
+    # sub_data[..., 2] -= sub_data[:, 0:1, 2]   # delete offset adjusting
+
+    n_frames = max(main_data.shape[0], sub_data.shape[0])
+
+    def update(index):
+        nonlocal fig, ax
+        index = min(n_frames - 1, int(index * fps))
+        fig.clear()
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+        plt.tight_layout()
+        init(ax)
+
+        for data, mins, maxs, trajec, label, color_set in [
+            (main_data, main_mins, main_maxs, main_trajec, 'Main', colors_blue),
+            (sub_data, sub_mins, sub_maxs, sub_trajec, 'Sub', colors),
+        ]:
+            frame_idx = min(index, data.shape[0] - 1)
+            frame = data[frame_idx]
+            ax.view_init(elev=120, azim=-90)
+            ax.dist = 7.5
+            plot_xzPlane(ax, shared_mins[0], shared_maxs[0], 0, shared_mins[2], shared_maxs[2])
+            used_colors = colors_blue if frame_idx in gt_frames else color_set
+            if len(used_colors) < len(kinematic_tree):
+                used_colors = used_colors * (len(kinematic_tree) // len(used_colors) + 1)
+            for i, (chain, color) in enumerate(zip(kinematic_tree, used_colors)):
+                linewidth = 4.0 if i < 5 else 2.0
+                ax.plot3D(frame[chain, 0], frame[chain, 1], frame[chain, 2], linewidth=linewidth, color=color)
+
+        plt.setp(ax, xticks=[], yticks=[], zticks=[])
+        ax.set_axis_off()
+        ax.grid(False)
+        fig.suptitle(title, fontsize=10)
+        return mplfig_to_npimage(fig)
+
+    animation = VideoClip(update, duration=n_frames / fps)
+    plt.close(fig)
+    return animation
 
 
 def main(args=None):
@@ -122,7 +232,8 @@ def main(args=None):
     print("Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
 
-    is_prediction = getattr(args, 'task', 'generation') == 'prediction'
+    is_prediction = getattr(args, 'task', 'generation') in ['prediction', 'collab_prediction']
+
     if is_prediction:
         args.pred_len = int(getattr(args, 'prediction_seconds', 0) * fps)
 
@@ -173,13 +284,14 @@ def main(args=None):
             model_kwargs['y']['history'] = torch.zeros(args.batch_size, model.njoints, model.nfeats, history_len, device=dist_util.dev())
 
     all_motions = []
+    all_main_motions = []
     all_lengths = []
     all_text = []
 
     def run_generation_loop(input_motion, model_kwargs):
         if input_motion is not None:
             input_motion = input_motion.to(dist_util.dev())
-        
+
         if is_prediction and input_motion is not None:
             history_len = int(getattr(args, 'input_seconds', 0) * fps)
             model_kwargs['y']['history'] = input_motion[..., :history_len]
@@ -202,7 +314,7 @@ def main(args=None):
                                                    model_kwargs['y']['text_embed'][1].unsqueeze(0).repeat(args.num_samples, 1, 1))
             else:
                 raise NotImplementedError('DiP model only supports BERT text encoder at the moment. If you implement this, please send a PR!')
-        
+
         for rep_i in range(args.num_repetitions):
             print(f'### Sampling [repetitions #{rep_i}]')
 
@@ -237,6 +349,14 @@ def main(args=None):
                                    jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
                                    get_rotations_back=False)
 
+            main_motion_sample = None
+            if getattr(args, 'task', 'generation') == 'collab_prediction' and 'main_motion' in model_kwargs['y']:
+                main_motion_input = model_kwargs['y']['main_motion']
+                main_motion_input = main_motion_input.to(dist_util.dev()) if torch.is_tensor(main_motion_input) else main_motion_input
+                main_motion_sample = model.rot2xyz(x=main_motion_input, mask=None, pose_rep=rot2xyz_pose_rep, glob=True, translation=True,
+                                                    jointstype='smpl', vertstrans=True, betas=None, beta=0, glob_rot=None,
+                                                    get_rotations_back=False)
+
             if args.unconstrained:
                 all_text.extend(['unconstrained'] * sample.shape[0])
             else:
@@ -260,6 +380,10 @@ def main(args=None):
             
             # Append as list of arrays. We will concatenate properly at the end.
             all_motions.append(sample_np)
+            if main_motion_sample is not None:
+                all_main_motions.append(main_motion_sample.detach().cpu().numpy())
+            else:
+                all_main_motions.append(np.zeros_like(sample_np))
             print(f"created {len(all_motions) * args.batch_size} batches of samples")
 
     if is_prediction and is_using_data:
@@ -282,6 +406,17 @@ def main(args=None):
         padded_motions.append(m)
 
     all_motions = np.concatenate(padded_motions, axis=0)
+    if len(all_main_motions) > 0:
+        max_main_len = max([m.shape[-1] for m in all_main_motions])
+        padded_main_motions = []
+        for m in all_main_motions:
+            if m.shape[-1] < max_main_len:
+                pad = np.zeros((*m.shape[:-1], max_main_len - m.shape[-1]), dtype=m.dtype)
+                m = np.concatenate([m, pad], axis=-1)
+            padded_main_motions.append(m)
+        all_main_motions = np.concatenate(padded_main_motions, axis=0)
+    else:
+        all_main_motions = np.zeros_like(all_motions)
     all_lengths = np.concatenate(all_lengths, axis=0)
     
     # Do not cutoff based on total_num_samples anymore if prediction dataset traversal
@@ -297,7 +432,7 @@ def main(args=None):
     npy_path = os.path.join(out_path, 'results.npy')
     print(f"saving results file to [{npy_path}]")
     np.save(npy_path,
-            {'motion': all_motions, 'text': all_text, 'lengths': all_lengths,
+            {'motion': all_motions, 'main_motion': all_main_motions, 'text': all_text, 'lengths': all_lengths,
              'num_samples': args.num_samples, 'num_repetitions': args.num_repetitions})
     if args.dynamic_text_path != '':
         text_file_content = '\n'.join(['#'.join(s) for s in all_text])
@@ -349,9 +484,21 @@ def main(args=None):
             save_file = sample_file_template.format(sample_i, rep_i)
             animation_save_path = os.path.join(out_path, save_file)
             gt_frames = np.arange(args.context_len) if args.context_len > 0 and not args.autoregressive else []
-            animation = plot_3d_motion(animation_save_path, 
-                                       skeleton, motion, dataset=args.dataset, title=caption, 
-                                       fps=fps, gt_frames=gt_frames)
+            if getattr(args, 'task', 'generation') == 'collab_prediction':
+                main_motion = all_main_motions[rep_i*args.batch_size + sample_i]
+                if getattr(args, 'autoregressive', False):
+                    main_motion = main_motion.transpose(2, 0, 1)[:length]
+                else:
+                    main_motion = main_motion.transpose(2, 0, 1)[:max_length]
+                    if main_motion.shape[0] > length:
+                        main_motion[length:-1] = main_motion[length-1]
+                animation = plot_collab_3d_motion(animation_save_path, skeleton, main_motion, motion,
+                                                  dataset=args.dataset, title=caption, fps=fps,
+                                                  gt_frames=gt_frames)
+            else:
+                animation = plot_3d_motion(animation_save_path, 
+                                           skeleton, motion, dataset=args.dataset, title=caption, 
+                                           fps=fps, gt_frames=gt_frames)
             animations[sample_i, rep_i] = animation
             rep_files.append(animation_save_path)
             

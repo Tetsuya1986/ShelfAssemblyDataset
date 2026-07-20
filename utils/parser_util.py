@@ -27,7 +27,6 @@ def parse_and_load_from_model(parser):
 def load_args_from_model(args, args_to_overwrite):
     model_path = get_model_path_from_args()
     args_path = os.path.join(os.path.dirname(model_path), 'args.json')
-
     assert os.path.exists(args_path), 'Arguments json file was not found!'
     with open(args_path, 'r') as fr:
         model_args = json.load(fr)
@@ -55,7 +54,7 @@ def apply_rules(args):
         args.multi_target_cond = True
         
     # Clear prediction parameters if not in prediction task
-    if hasattr(args, 'task') and args.task != 'prediction':
+    if hasattr(args, 'task') and args.task not in ['prediction', 'collab_prediction']:
         args.input_seconds = None
         args.prediction_seconds = None
         args.stride = None
@@ -152,7 +151,7 @@ def add_data_options(parser):
     group.add_argument("--split", default="train", type=str,
                        help="Dataset split to evaluate on (e.g. train, test, val).")
     group.add_argument("--task", default='generation', choices=['generation', 'prediction', 'collab_prediction'], type=str,
-                       help="Task type: generation, prediction, or joint_motion_prediction (predict partner motion from main motion).")
+                       help="Task type: generation, prediction, or collab_prediction (predict partner motion from main motion).")
     group.add_argument("--input_seconds", default=0.5, type=float,
                        help="Input/history window size in seconds (for prediction mode).")
     group.add_argument("--prediction_seconds", default=1.0, type=float,

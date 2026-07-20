@@ -1313,7 +1313,7 @@ class GaussianDiffusion:
 
             # If training for joint motion prediction, explicitly record the sub-motion loss
             # (which is identical to rot_mse since x_start_target corresponds to the Sub motion).
-            if getattr(dataset, 'task', 'generation') == 'joint_motion_prediction':
+            if getattr(dataset, 'task', 'generation') == 'collab_prediction':
                 terms["sub_motion_rot_mse"] = terms["rot_mse"]
 
             target_xyz, model_output_xyz = None, None
@@ -1322,7 +1322,7 @@ class GaussianDiffusion:
                 target_xyz = get_xyz(target)  # [bs, nvertices(vertices)/njoints(smpl), 3, nframes]
                 model_output_xyz = get_xyz(model_output)  # [bs, nvertices, 3, nframes]
                 terms["rcxyz_mse"] = self.masked_l2(target_xyz, model_output_xyz, mask)  # mean_flat((target_xyz - model_output_xyz) ** 2)
-                if getattr(dataset, 'task', 'generation') == 'joint_motion_prediction':
+                if getattr(dataset, 'task', 'generation') == 'collab_prediction':
                     terms["sub_motion_rcxyz_mse"] = terms["rcxyz_mse"]
 
             if self.lambda_vel_rcxyz > 0.:

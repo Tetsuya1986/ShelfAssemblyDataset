@@ -54,9 +54,9 @@ def load_model_wo_clip(model, state_dict):
     state_dict.pop("sequence_pos_encoder.pe", None)
     state_dict.pop("embed_timestep.sequence_pos_encoder.pe", None)
     # for comad data
-    state_dict.pop('input_process.poseEmbedding.weight', None)
-    state_dict.pop('output_process.poseFinal.weight', None)
-    state_dict.pop('output_process.poseFinal.bias', None)
+    # state_dict.pop('input_process.poseEmbedding.weight', None)
+    # state_dict.pop('output_process.poseFinal.weight', None)
+    # state_dict.pop('output_process.poseFinal.bias', None)
 
     missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
     assert len(unexpected_keys) == 0

@@ -363,7 +363,6 @@ class MDM(nn.Module):
             else:
                 xseq = x
             xseq = self.sequence_pos_encoder(xseq)  # [seqlen+1, bs, d]
-
             output = self.seqTransDecoder(tgt=xseq, memory=emb, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=frames_mask)
 
             if self.emb_trans_dec:
