@@ -416,7 +416,8 @@ def main(args=None):
         
     # generate_args() / apply_rules() may strip prediction parameters if it loaded `task=generation` from the checkpoint args.json
     # We must explicitly force prediction mode here to evaluate futures.
-    args.task = 'collab_prediction'
+    # args.task = 'collab_prediction'
+    args.task = 'prediction'
     if args.input_seconds is None:
         args.input_seconds = getattr(args, 'input_seconds_cli', 0.5)
     if args.prediction_seconds is None:
@@ -528,7 +529,7 @@ def main(args=None):
             
             # Detect collaboration prediction task
             is_collab_task = hasattr(args, 'task') and args.task == 'collab_prediction'
-            is_collab_task = True
+            # is_collab_task = True
             verb = model_kwargs['y'].get('verb', None) if 'y' in model_kwargs else None
             verb = verb[0]
 
@@ -734,18 +735,25 @@ def main(args=None):
         )
         print(res_str)
 
-    # Standard prediction metrics
+    # Standard prediction metrics: compute mean and std and report as mean ± std
     mean_ade = np.mean(all_ade)
+    std_ade = np.std(all_ade)
     mean_fde = np.mean(all_fde)
+    std_fde = np.std(all_fde)
     mean_mpjpe = np.mean(all_mpjpe)
+    std_mpjpe = np.std(all_mpjpe)
     mean_apd = np.mean(all_apd)
+    std_apd = np.std(all_apd)
+
+    n_samples = len(all_ade)
 
     res_str = (
         f"Prediction Evaluation Metrics (K={args.num_repetitions})\n"
-        f"ADE@{args.num_repetitions}: {mean_ade:.4f}\n"
-        f"FDE@{args.num_repetitions}: {mean_fde:.4f}\n"
-        f"MPJPE@{args.num_repetitions}: {mean_mpjpe:.4f}\n"
-        f"APD@{args.num_repetitions}: {mean_apd:.4f}\n"
+        f"Number of samples: {n_samples}\n"
+        f"ADE@{args.num_repetitions}: {mean_ade:.4f}±{std_ade:.4f}\n"
+        f"FDE@{args.num_repetitions}: {mean_fde:.4f}±{std_fde:.4f}\n"
+        f"MPJPE@{args.num_repetitions}: {mean_mpjpe:.4f}±{std_mpjpe:.4f}\n"
+        f"APD@{args.num_repetitions}: {mean_apd:.4f}±{std_apd:.4f}\n"
     )
     print(res_str)
     
