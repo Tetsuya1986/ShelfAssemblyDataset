@@ -291,18 +291,24 @@ def main(args=None):
 
     # Aggregate metrics
     mean_ade = np.mean(all_ade)
+    std_ade = np.std(all_ade)
     mean_fde = np.mean(all_fde)
+    std_fde = np.std(all_fde)
     mean_mpjpe = np.mean(all_mpjpe)
+    std_mpjpe = np.std(all_mpjpe)
     mean_apd = np.mean(all_apd)
+    std_apd = np.std(all_apd)
+
+    n_samples = len(all_ade)
 
     res_str = (
         f"\n{'='*40}\n"
         f"Prediction Evaluation Metrics (K={args.num_repetitions})\n"
-        f"{'='*40}\n"
-        f"ADE@{args.num_repetitions}: {mean_ade:.4f}\n"
-        f"FDE@{args.num_repetitions}: {mean_fde:.4f}\n"
-        f"MPJPE@{args.num_repetitions}: {mean_mpjpe:.4f}\n"
-        f"APD@{args.num_repetitions}: {mean_apd:.4f}\n"
+        f"Number of samples: {n_samples}\n"
+        f"ADE@{args.num_repetitions}: {mean_ade:.4f}±{std_ade:.4f}\n"
+        f"FDE@{args.num_repetitions}: {mean_fde:.4f}±{std_fde:.4f}\n"
+        f"MPJPE@{args.num_repetitions}: {mean_mpjpe:.4f}±{std_mpjpe:.4f}\n"
+        f"APD@{args.num_repetitions}: {mean_apd:.4f}±{std_apd:.4f}\n"
         f"{'='*40}\n"
     )
     print(res_str)
