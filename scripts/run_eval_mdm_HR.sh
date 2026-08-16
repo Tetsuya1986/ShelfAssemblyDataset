@@ -8,6 +8,6 @@
 #SBATCH -o log/stdout.%J
 #SBATCH -e log/stderr.%J
 #python -m sample.eval_prediction --dataset shelf_assembly --task prediction --input_seconds 0.5 --prediction_seconds 2.0 --model_path save/20260627_action_prediction_bert_50steps_2.0_HR-predictR_a21a/model000040000.pt  --split test --num_repetitions 3 --autoregressive --autoregressive_include_prefix --data_sel HR-predictR --num_eval_samples 200
-python -m sample.eval_prediction --dataset shelf_assembly --task prediction --label_option action_taskcommon --input_seconds 0.5 --prediction_seconds 1.0 --model_path save/20260627_action_prediction_bert_50steps_1.0_HR-predictR_739y/model000110000.pt  --split test --num_repetitions 3 --autoregressive --autoregressive_include_prefix --data_sel HR-predictR --num_eval_samples 200
+python -m sample.eval_prediction --dataset shelf_assembly --task prediction --label_option action_taskcommon --input_seconds 0.5 --prediction_seconds 1.0 --model_path save/20260816_action_prediction_bert_50steps_1.0_HR-predictR_ofs8/model000210000.pt  --split test --num_repetitions 3 --autoregressive --autoregressive_include_prefix --data_sel HR-predictR
 #python -m sample.eval_prediction --dataset shelf_assembly --task joint_motion_prediction --input_seconds 0.5 --prediction_seconds 1.0 --hml_mode action --model_path save/20260301_joint_motion_prediction_bert_50steps_action_18ld/model000240000.pt  --split test --num_repetitions 10 --autoregressive --autoregressive_include_prefix
 
