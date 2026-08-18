@@ -529,7 +529,10 @@ def main(args=None):
             
             # Detect collaboration prediction task
             is_collab_task = hasattr(args, 'task') and args.task == 'collab_prediction'
+            #-------debug------------
+            # args.task = 'collab_prediction'
             # is_collab_task = True
+            #-------debug------------
             verb = model_kwargs['y'].get('verb', None) if 'y' in model_kwargs else None
             verb = verb[0]
 
@@ -537,7 +540,7 @@ def main(args=None):
             # if verb_lower not in ["hand over", "receive"]:
             # if verb_lower not in ["pick up", "put down"]:
             # if verb_lower not in ["flip", "rotate"]:
-            #     continue
+                # continue
 
             # Extract Main motion for collaboration tasks
             main_motion = None
