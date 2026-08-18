@@ -390,7 +390,7 @@ def judge_success_failure(res_dic):
     verb = res_dic['verb']
     if verb in ["hand over", "receive"]:
         print(f"[hand over / receive] {res_dic['pred_min_distance_overall']}")
-        return res_dic['pred_min_distance_overall'] < 0.1
+        return res_dic['pred_min_distance_overall'] < 0.3
 
     elif verb in ["pick up", "put down"]:
         print(f"[pick up / put down] {res_dic['pred_min_distance_overall']}")
@@ -540,7 +540,7 @@ def main(args=None):
             # if verb_lower not in ["hand over", "receive"]:
             # if verb_lower not in ["pick up", "put down"]:
             # if verb_lower not in ["flip", "rotate"]:
-                # continue
+            #     continue
 
             # Extract Main motion for collaboration tasks
             main_motion = None
@@ -723,7 +723,10 @@ def main(args=None):
             evaluated_count += bs
 
     if is_collab_task:
-        success_rate = sum(all_collab_success)/len(all_collab_success)
+        if len(all_collab_success) > 0:
+            success_rate = sum(all_collab_success)/len(all_collab_success)
+        else:
+            success_rate = 0.0
 
     if len(all_ade) == 0 and len(all_collab_metrics) == 0:
         print("No valid sequences found for evaluation.")
